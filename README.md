@@ -21,12 +21,15 @@ behavior, except what is stated as measured in [docs/capture-findings.md](docs/c
 2. **Nastro asks macOS for three streams**: the picture of a screen or window, the sound the Mac is
    playing (the other people's voices), and your microphone.
 3. **While recording**, the panel shows one level bar for the system audio and one for the
-   microphone, so you can see at a glance that both are arriving. A muted source raises a warning.
+   microphone, so you can see at a glance that both are arriving. A muted source raises a warning
+   in the panel; a voice that is not being recorded at all also puts a red octagon next to the menu
+   bar icon and sends a notification.
 4. **Nastro writes a work file** next to the final one (`... .nastro-partial.mov`), in small
    fragments, so a crash does not lose the recording.
 5. **When you stop**, it produces the final file: the video is copied without re-encoding and the
-   two audio tracks are merged into one, so both voices play in any player. Then the work file is
-   deleted and a notification appears; clicking it shows the file in Finder.
+   two audio tracks are merged into one, so both voices play in any player. The copy is written
+   under a temporary name (`... .nastro-finalizing.mp4`) and gets its final name only when complete.
+   Then the work file is deleted and a notification appears; clicking it shows the file in Finder.
 
 Nastro uses only Apple frameworks and has no dependencies. It records only while you tell it to, and
 nothing leaves your Mac.
@@ -66,19 +69,27 @@ Notifications are also requested, to tell you when a recording is saved or somet
 ## Usage
 
 `⌃⌥N` starts and stops a recording, or use the menu bar icon. While recording, the icon turns red and
-shows the elapsed time.
+shows the elapsed time. A red octagon next to it means a voice is not being recorded (system audio
+or microphone not recorded, microphone disconnected); silence never changes the icon, it only shows
+in the panel under its level bar. An orange triangle next to the idle icon means a problem to fix
+before recording, such as a missing permission. If another app already holds the shortcut
+(`⌃⌥` plus your letter), the panel shows a row saying so, Settings show the same note, and the
+shortcut is not shown next to the Start button; choose another letter.
 
 In the panel, when idle:
 
-- **What to record**: *Video + audio* or *Audio only*.
-- **Video source**: a screen or a single window. System audio is always the whole system's, even
+- **What to Record**: *Video + Audio* or *Audio Only*.
+- **Video Source**: a screen or a single window. System audio is always the whole system's, even
   when only one window is filmed, because the call must be heard anyway. Nastro's own windows and
   sound are left out.
-- **Audio**: system audio (the call) and microphone can each be turned off. In audio-only mode at
-  least one must stay on.
-- **Open recordings folder**, **Settings…**, **Quit**.
+- **Audio**: **System Audio** (the call) and **Microphone** can each be turned off. In audio-only
+  mode at least one must stay on: the last one checked cannot be unchecked.
+- **Open Recordings Folder**, **Settings…**, **Quit**.
 
-The choices cannot be changed while recording, and they are remembered between launches.
+The choices cannot be changed while recording, and they are remembered between launches. While a
+recording runs, Settings are locked too (except the shortcut) and say that changes apply from the
+next recording. An audio-only recording that receives no audio within 5 seconds stops by itself,
+keeps no file and says why.
 
 **Files.** By default they go to `~/Movies/Nastro/`, named like `2026-11-17 14.30 Call.mp4` (video)
 or `2026-11-17 14.30 Call.m4a` (audio only). If the name exists, a number is added (`... Call 2.mp4`).
@@ -95,11 +106,19 @@ The interface is in English or Italian, following your Mac's language.
 
 The work file stays readable up to the last fragment. At the next launch Nastro looks in the
 recordings folder for leftover work files, turns each into a final file and tells you with a
-notification. A work file that cannot be recovered is renamed `... .nastro-damaged.mov` so it is
-not retried every time. If the final merge fails, the work file is kept, never deleted. This was
-confirmed on a crash test (an app killed with `kill -9` left a file that opens, see
-[docs/capture-findings.md](docs/capture-findings.md)), but not yet through the full app on a real
-interruption.
+notification. Temporary `... .nastro-finalizing.mp4` files left by an interrupted final step are
+deleted first (they are never the only copy), so the recovered file keeps its original name. A work
+file that cannot be read, or has no tracks, is renamed `... .nastro-damaged.mov` so it is not
+retried every time. If there is not enough free space to prepare it, or the final merge fails for
+another reason, the work file is left untouched and tried again at the next launch; a notification
+says so. The work file is never deleted before its final file exists.
+
+While recording, Nastro stops by itself when free space falls below the work file's size plus
+500 MB (and never below 1 GB), so there is still room to prepare the final file.
+
+Evidence: a recording driven by the app's own recording controller (the `--probe-record`
+diagnostic below) was killed with `kill -9` at 13 s, and at the next launch it was recovered as a
+12 s file that opens. Not yet confirmed with the installed app on a real interruption.
 
 ## Diagnostics (for developers)
 
@@ -108,19 +127,24 @@ The binary can run a few checks from the terminal instead of starting the menu b
 ```bash
 dist/Nastro.app/Contents/MacOS/Nastro --probe-record 10 display   # or: window | audio
 dist/Nastro.app/Contents/MacOS/Nastro --probe-recover
-dist/Nastro.app/Contents/MacOS/Nastro --preview idle              # or: recording | problem | settings
+dist/Nastro.app/Contents/MacOS/Nastro --preview idle              # or: recording | problem | settings | settings-recording | menubar
 ```
 
 `--probe-record <seconds> <display|window|audio>` records into `~/Movies/Nastro/` and prints
 `PROBE-RECORD ok <file>` or `PROBE-RECORD failed <reason>`. `--probe-recover` finalizes leftover work
 files in the default folder and prints one `PROBE-RECOVER ...` line per file. `--preview` shows the
-panel or the Settings window in a given state. There is also a separate `NastroProbe` tool used to
+panel, the Settings window or the menu bar icon's states in a given state. There is also a separate `NastroProbe` tool used to
 measure the capture APIs (`swift run NastroProbe`; see [docs/capture-findings.md](docs/capture-findings.md)).
 
 ## Known limits
 
 - **No echo cancellation.** With speakers, the microphone also picks up the other people's voices.
   Use headphones.
+- **A microphone that changes mid-recording stops being recorded.** A microphone whose first sample
+  arrives more than 2 s after the recording starts, or whose audio format changes mid-recording (for
+  example AirPods connecting during the call), stops being recorded for the rest of that recording.
+  The app shows a red warning and sends a notification; the remedy is to stop and start a new
+  recording. See [docs/capture-findings.md](docs/capture-findings.md).
 - **The video is HEVC.** It plays on Apple devices but may not open on some Windows machines.
 - **Recording other people may require their consent.** Tell the participants.
 - **Not yet tested by hand or on a real call.** What happens when the recorded window is closed, or
@@ -168,12 +192,15 @@ verificato, tranne ciò che è indicato come misurato in
    sta riproducendo il Mac (le voci degli altri) e il microfono.
 3. **Durante la registrazione** il pannello mostra una barra di livello per l'audio di sistema e una
    per il microfono, così vedi subito che arrivano entrambi. Una sorgente muta fa comparire un
-   avviso.
+   avviso nel pannello; una voce che non viene registrata affatto fa comparire anche un ottagono
+   rosso accanto all'icona nella barra dei menu e manda una notifica.
 4. **Nastro scrive un file di lavoro** accanto a quello finale (`... .nastro-partial.mov`), a piccoli
    frammenti, così un arresto improvviso non fa perdere la registrazione.
 5. **Quando fermi**, produce il file finale: il video viene copiato senza ricodifica e le due tracce
-   audio vengono fuse in una sola, così entrambe le voci si sentono in qualsiasi player. Poi il file
-   di lavoro viene cancellato e arriva una notifica; cliccandola il file si mostra nel Finder.
+   audio vengono fuse in una sola, così entrambe le voci si sentono in qualsiasi player. La copia
+   viene scritta con un nome provvisorio (`... .nastro-finalizing.mp4`) e prende il nome finale solo
+   quando è completa. Poi il file di lavoro viene cancellato e arriva una notifica; cliccandola il
+   file si mostra nel Finder.
 
 Nastro usa solo framework Apple, senza dipendenze. Registra solo quando glielo dici tu e nulla esce
 dal tuo Mac.
@@ -214,7 +241,13 @@ andato storto.
 ## Uso
 
 `⌃⌥N` avvia e ferma la registrazione, oppure usa l'icona nella barra dei menu. Durante la
-registrazione l'icona diventa rossa e mostra il tempo trascorso.
+registrazione l'icona diventa rossa e mostra il tempo trascorso. Un ottagono rosso accanto vuol dire
+che una voce non viene registrata (audio di sistema o microfono non registrati, microfono
+scollegato); il silenzio non cambia mai l'icona, compare solo nel pannello sotto la sua barra di
+livello. Un triangolo arancione accanto all'icona a riposo indica un problema da risolvere prima di
+registrare, per esempio un permesso mancante. Se un'altra app usa già la scorciatoia (`⌃⌥` più la
+tua lettera), il pannello lo dice in una riga, le Impostazioni mostrano lo stesso avviso e accanto
+al pulsante di avvio la scorciatoia non compare; scegli un'altra lettera.
 
 Nel pannello, a riposo:
 
@@ -222,11 +255,15 @@ Nel pannello, a riposo:
 - **Sorgente video**: uno schermo o una singola finestra. L'audio di sistema è sempre quello di tutto
   il sistema, anche se si riprende una sola finestra, perché la call deve comunque sentirsi. Le
   finestre e il suono di Nastro stesso sono esclusi.
-- **Audio**: audio di sistema (la call) e microfono si possono disattivare separatamente. In
-  modalità solo audio ne deve restare attivo almeno uno.
+- **Audio**: **Audio di sistema** (la call) e **Microfono** si possono disattivare separatamente. In
+  modalità solo audio ne deve restare attivo almeno uno: l'ultimo selezionato non si può
+  deselezionare.
 - **Apri cartella registrazioni**, **Impostazioni…**, **Esci**.
 
 Le scelte non si cambiano durante la registrazione e vengono ricordate tra un avvio e l'altro.
+Durante una registrazione anche le Impostazioni sono bloccate (tranne la scorciatoia) e dicono che le
+modifiche valgono dalla prossima registrazione. Una registrazione solo audio che non riceve audio
+entro 5 secondi si ferma da sola, non lascia file e ne spiega il motivo.
 
 **File.** Di default vanno in `~/Movies/Nastro/`, con nomi come `2026-11-17 14.30 Call.mp4` (video)
 o `2026-11-17 14.30 Call.m4a` (solo audio). Se il nome esiste già si aggiunge un numero
@@ -244,11 +281,20 @@ L'interfaccia è in italiano o in inglese, secondo la lingua del Mac.
 
 Il file di lavoro resta leggibile fino all'ultimo frammento. Al prossimo avvio Nastro cerca nella
 cartella delle registrazioni i file di lavoro rimasti, ne ricava un file finale per ciascuno e te lo
-dice con una notifica. Un file di lavoro che non si riesce a recuperare viene rinominato
-`... .nastro-damaged.mov`, così non viene ritentato a ogni avvio. Se la fusione finale fallisce, il
-file di lavoro viene conservato, mai cancellato. Questo è stato confermato con una prova di arresto
-(un'app terminata con `kill -9` ha lasciato un file che si apre, vedi
-[docs/capture-findings.md](docs/capture-findings.md)), ma non ancora con l'app completa su
+dice con una notifica. I file provvisori `... .nastro-finalizing.mp4` lasciati da una preparazione
+interrotta vengono cancellati prima (non sono mai l'unica copia), così il file recuperato mantiene il
+suo nome originale. Un file di lavoro che non si riesce a leggere, o senza tracce, viene rinominato
+`... .nastro-damaged.mov`, così non viene ritentato a ogni avvio. Se manca lo spazio per prepararlo,
+o la fusione finale fallisce per un altro motivo, il file di lavoro resta intatto e viene ritentato
+al prossimo avvio; una notifica lo dice. Il file di lavoro non viene mai cancellato prima che esista
+il suo file finale.
+
+Durante la registrazione Nastro si ferma da sola quando lo spazio libero scende sotto la dimensione
+del file di lavoro più 500 MB (e mai sotto 1 GB), così resta lo spazio per preparare il file finale.
+
+Prove: una registrazione guidata dal controller di registrazione dell'app stessa (la diagnostica
+`--probe-record` qui sotto) è stata terminata con `kill -9` a 13 s e al lancio successivo è stata
+recuperata come file di 12 s che si apre. Non ancora confermato con l'app installata su
 un'interruzione reale.
 
 ## Diagnostica (per sviluppatori)
@@ -258,13 +304,14 @@ L'eseguibile può fare alcune verifiche da terminale invece di avviare l'app nel
 ```bash
 dist/Nastro.app/Contents/MacOS/Nastro --probe-record 10 display   # oppure: window | audio
 dist/Nastro.app/Contents/MacOS/Nastro --probe-recover
-dist/Nastro.app/Contents/MacOS/Nastro --preview idle              # oppure: recording | problem | settings
+dist/Nastro.app/Contents/MacOS/Nastro --preview idle              # oppure: recording | problem | settings | settings-recording | menubar
 ```
 
 `--probe-record <secondi> <display|window|audio>` registra in `~/Movies/Nastro/` e stampa
 `PROBE-RECORD ok <file>` oppure `PROBE-RECORD failed <motivo>`. `--probe-recover` finalizza i file di
 lavoro rimasti nella cartella predefinita e stampa una riga `PROBE-RECOVER ...` per ciascuno.
-`--preview` mostra il pannello o la finestra Impostazioni in uno stato dato. Esiste anche uno
+`--preview` mostra il pannello, la finestra Impostazioni o gli stati dell'icona nella barra dei menu
+in uno stato dato. Esiste anche uno
 strumento separato, `NastroProbe`, usato per misurare le API di cattura (`swift run NastroProbe`;
 vedi [docs/capture-findings.md](docs/capture-findings.md)).
 
@@ -272,6 +319,11 @@ vedi [docs/capture-findings.md](docs/capture-findings.md)).
 
 - **Nessuna cancellazione dell'eco.** Con gli altoparlanti il microfono riprende anche le voci degli
   altri. Usa le cuffie.
+- **Un microfono che cambia a metà registrazione smette di essere registrato.** Un microfono il cui
+  primo campione arriva più di 2 s dopo l'avvio della registrazione, o il cui formato audio cambia a
+  metà (per esempio gli AirPods che si collegano durante la call), smette di essere registrato per il
+  resto di quella registrazione. L'app mostra un avviso rosso e manda una notifica; il rimedio è
+  fermare e avviare una nuova registrazione. Vedi [docs/capture-findings.md](docs/capture-findings.md).
 - **Il video è HEVC.** Si apre sui dispositivi Apple ma potrebbe non aprirsi su alcuni computer
   Windows.
 - **Registrare altre persone può richiedere il loro consenso.** Avvisa i partecipanti.

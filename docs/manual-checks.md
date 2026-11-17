@@ -4,7 +4,14 @@ Controlli da fare a mano sull'app installata (`./build.sh --install`). Ogni pass
 cosa fare e cosa deve succedere. Se il risultato è diverso, annota cosa è successo.
 
 I passi 19–22 in fondo coprono le correzioni successive (impostazioni bloccate, scorciatoia
-occupata, riga del permesso).
+occupata, riga del permesso); i passi 23–28 coprono AirPods, sincronia, recupero dopo un arresto,
+ascolto con un solo auricolare e disco esterno scollegato.
+
+**Icone nella barra dei menu.** Il triangolo arancione accanto all'icona compare solo per un
+problema da risolvere prima di registrare (per esempio un permesso mancante). Durante la
+registrazione, se una voce non viene registrata (audio di sistema o microfono non registrati,
+microfono scollegato) accanto al pallino rosso compare un ottagono rosso con la croce. Il silenzio
+non cambia l'icona: compare solo nel pannello, sotto la barra di livello.
 
 ## Primo avvio e permessi
 
@@ -58,11 +65,13 @@ occupata, riga del permesso).
 
 13. Avvia una registrazione con il microfono in muto o coperto.
     **Atteso:** entro circa 5 secondi sotto la barra del Microfono compare "Microfono muto" in
-    arancione e accanto all'icona compare il triangolo; per questo avviso non arriva nessuna
-    notifica.
+    arancione; l'icona nella barra dei menu non cambia (resta il pallino rosso con il tempo, senza
+    triangolo né ottagono); per questo avviso non arriva nessuna notifica.
 14. Durante una registrazione scollega o spegni il microfono scelto.
-    **Atteso:** la registrazione continua; sotto la barra del Microfono compare un avviso e
-    arriva una notifica; il file finale contiene comunque l'audio di sistema.
+    **Atteso:** la registrazione continua; entro circa 5 secondi sotto la barra del Microfono
+    compare un avviso rosso ("Microfono scollegato" o "Il microfono non viene registrato"), accanto
+    al pallino rosso nella barra dei menu compare l'ottagono rosso e arriva una notifica; il file
+    finale contiene comunque l'audio di sistema.
     **Se invece si ferma tutta la registrazione, annotalo** (questione aperta nota).
 
 ## Sorgente che sparisce, sospensione
@@ -105,3 +114,35 @@ occupata, riga del permesso).
     (o esci dalla sua app) e riapri il menu di Nastro; poi avvia una registrazione.
     **Atteso:** la sorgente video mostra lo schermo principale e la registrazione cattura lo
     schermo principale (nessun errore "La sorgente scelta non è disponibile.").
+
+## AirPods, sincronia, recupero, ascolto, disco esterno
+
+23. Collega gli AirPods (o altre cuffie Bluetooth con microfono) **prima** di avviare la
+    registrazione, scegli il loro microfono (o lascia quello di sistema se sono già il
+    predefinito), fai una call di prova di un paio di minuti parlando e ascoltando, poi ferma.
+    **Atteso:** nel file finale si sentono entrambe le voci (la tua e quella degli altri); la tua
+    voce ha l'altezza normale (non accelerata né rallentata, non "da robot"); nessun ottagono
+    rosso durante la registrazione.
+24. Avvia una registrazione con il microfono del Mac e, a registrazione in corso, collega gli
+    AirPods.
+    **Atteso (limite noto):** il microfono può smettere di essere registrato per il resto della
+    registrazione: sotto la barra del Microfono compare l'avviso rosso "Il microfono non viene
+    registrato", nella barra dei menu l'ottagono rosso e arriva una notifica. Annota cosa succede
+    davvero (avviso sì/no, la tua voce nel file prima e dopo il collegamento). Il rimedio è fermare
+    e avviare una nuova registrazione.
+25. Scegli come sorgente video la finestra della call (o un video con persone che parlano) e
+    registra per almeno 10 minuti.
+    **Atteso:** alla fine del file il labiale è ancora a tempo con le voci, come all'inizio (nessun
+    ritardo o anticipo che cresce col tempo).
+26. Con l'app installata avvia una registrazione, dopo circa 15 secondi terminala con
+    `pkill -9 Nastro` dal Terminale, poi riapri Nastro.
+    **Atteso:** arriva la notifica "Registrazione recuperata" con il nome del file; il file si apre
+    e dura circa quanto la registrazione (al massimo qualche secondo in meno); nella cartella non
+    restano file `.nastro-partial.mov` né `.nastro-finalizing.mp4`.
+27. Ascolta un file finale (con entrambe le voci) usando un solo auricolare (solo il sinistro, poi
+    solo il destro).
+    **Atteso:** in ciascun orecchio si sentono entrambe le voci, la tua e quella degli altri.
+28. Nelle Impostazioni scegli come cartella delle registrazioni una cartella su un disco esterno,
+    poi espelli e scollega il disco e premi "Avvia registrazione".
+    **Atteso:** la registrazione non parte; il menu mostra un errore chiaro ("La cartella delle
+    registrazioni non è scrivibile.") e arriva una notifica; nessun file viene creato altrove.
