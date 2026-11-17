@@ -263,8 +263,12 @@ struct MenuView: View {
                 MeterRow(title: L10n.t(.microphone), db: status.microphoneLevelDB,
                          warnings: MeterWarnings.for(.microphone, in: status.warnings))
             }
-            ForEach(MeterWarnings.panelRows(in: status.warnings), id: \.self) { warning in
-                WarningText(warning: warning)
+            let rows = MeterWarnings.panelRows(in: status.warnings)
+            if !rows.isEmpty {
+                Divider()
+                ForEach(rows, id: \.self) { warning in
+                    WarningText(warning: warning)
+                }
             }
         }
     }
@@ -395,11 +399,14 @@ struct MenuBarLabelView: View {
 
     static func image(for label: MenuBarLabel) -> NSImage {
         let pointSize: CGFloat = 14
-        func symbol(_ name: String, color: NSColor?) -> NSImage? {
+        func symbol(_ name: String, colors: [NSColor]) -> NSImage? {
             var configuration = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .regular)
-            if let color { configuration = configuration.applying(.init(paletteColors: [color])) }
+            if !colors.isEmpty { configuration = configuration.applying(.init(paletteColors: colors)) }
             return NSImage(systemSymbolName: name, accessibilityDescription: nil)?
                 .withSymbolConfiguration(configuration)
+        }
+        func symbol(_ name: String, color: NSColor?) -> NSImage? {
+            symbol(name, colors: color.map { [$0] } ?? [])
         }
         let colored = label.isRed
         var parts: [NSImage] = []
@@ -407,8 +414,9 @@ struct MenuBarLabelView: View {
         if label.showsWarning, let triangle = symbol(MenuBarLabel.warningSymbol, color: colored ? .systemOrange : nil) {
             parts.append(triangle)
         }
-        // Always red, whatever the state: a voice is not being recorded.
-        if label.showsCritical, let octagon = symbol(MenuBarLabel.criticalSymbol, color: .systemRed) {
+        // Always red with a white cross, whatever the state: a voice is not being recorded. The
+        // cross keeps it from reading as a second recording dot.
+        if label.showsCritical, let octagon = symbol(MenuBarLabel.criticalSymbol, colors: [.white, .systemRed]) {
             parts.append(octagon)
         }
         let spacing: CGFloat = 3
