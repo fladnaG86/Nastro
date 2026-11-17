@@ -66,6 +66,23 @@ final class FinalizerTests: XCTestCase {
         XCTAssertLessThan(middle, -50)
     }
 
+    func testMonoMicrophoneIsCentredInTheMix() async throws {
+        // M2: mic (16 kHz mono) tone only in 2…3 s, system silent → in the final stereo track
+        // the tone is in both channels, at levels within 6 dB of each other.
+        try await makeWorkWithBothSources(system: 10...11, mic: 2...3)
+        let final = directory.appendingPathComponent("final.mp4")
+
+        try await Finalizer.finalize(workFile: workURL, to: final, keepSeparateTracks: false)
+
+        let formats = try await TestMedia.audioFormats(of: final)
+        XCTAssertEqual(formats.map(\.channels), [2])
+        let peaks = try await TestMedia.channelPeaks(of: final, from: 2.1, to: 2.9)
+        XCTAssertEqual(peaks.count, 2)
+        XCTAssertGreaterThan(peaks[0], -20, "left: \(peaks)")
+        XCTAssertGreaterThan(peaks[1], -20, "right: \(peaks)")
+        XCTAssertLessThanOrEqual(abs(peaks[0] - peaks[1]), 6, "\(peaks)")
+    }
+
     func testKeepSeparateTracks() async throws {
         // keepSeparateTracks: true → audio 2
         try await makeWorkWithBothSources()
