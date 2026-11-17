@@ -1,89 +1,71 @@
 import AppKit
-import CoreMedia
 import Foundation
 import NastroCore
 import NastroMedia
 
-/// Diagnostic: `Nastro --probe-record <seconds> <display|window|audio>` records for the given
-/// seconds into `~/Movies/Nastro/` through CaptureSession → MovieWriter → Finalizer, prints one
-/// line per stage and ends with `PROBE-RECORD ok <file>` (exit 0) or
-/// `PROBE-RECORD failed <reason>` (exit 1).
+/// Diagnostics that drive the real `RecordingController` from the terminal.
+///
+/// `Nastro --probe-record <seconds> <display|window|audio>` records into `~/Movies/Nastro/`
+/// with start() → wait → stop() → stop() again (the second call must be harmless) and ends
+/// with `PROBE-RECORD ok <file>` (exit 0) or `PROBE-RECORD failed <reason>` (exit 1).
+///
+/// `Nastro --probe-recover` runs `recoverLeftovers()` on the default folder and prints one
+/// `PROBE-RECOVER recovered|damaged <file>` line per outcome (`PROBE-RECOVER none` if none).
+///
+/// Settings go to a throwaway defaults domain so the app's own settings are never touched.
+@MainActor
 enum ProbeRecord {
-    private final class Sink: CaptureSink, @unchecked Sendable {
-        let writer: MovieWriter
-        private let lock = NSLock()
-        private var counts: [SampleKind: Int] = [:]
-        private var peaks: [SampleKind: Float] = [:]
-        private var stopError: Error?
-        private var stopped = false
+    private static let defaultsSuite = "it.nastro.probe"
 
-        init(writer: MovieWriter) { self.writer = writer }
-
-        func capture(_ kind: SampleKind, _ buffer: CMSampleBuffer) {
-            let peak = kind == .video ? 0 : ProbeRecord.peak(buffer)
-            lock.withLock {
-                counts[kind, default: 0] += 1
-                peaks[kind] = max(peaks[kind] ?? 0, peak)
-            }
-            writer.append(kind, buffer)
-        }
-
-        func captureStopped(error: Error?) {
-            lock.withLock { stopped = true; stopError = error }
-        }
-
-        var summary: String {
-            lock.withLock {
-                func db(_ kind: SampleKind) -> String {
-                    guard let p = peaks[kind], p > 0 else { return "-inf" }
-                    return String(format: "%.1f", 20 * log10(Double(p)))
-                }
-                return "video=\(counts[.video] ?? 0) "
-                    + "systemAudio=\(counts[.systemAudio] ?? 0) (peak \(db(.systemAudio)) dB) "
-                    + "microphone=\(counts[.microphone] ?? 0) (peak \(db(.microphone)) dB)"
-            }
-        }
-
-        var stoppedByItself: (Bool, Error?) { lock.withLock { (stopped, stopError) } }
-    }
-
-    private struct Failure: Error, CustomStringConvertible { let description: String }
-
-    static func run(_ arguments: [String]) -> Never {
+    nonisolated static func run(_ arguments: [String]) -> Never {
         guard arguments.count >= 2, let seconds = Double(arguments[0]), seconds > 0,
               ["display", "window", "audio"].contains(arguments[1]) else {
             print("usage: Nastro --probe-record <seconds> <display|window|audio>")
             exit(1)
         }
         // ScreenCaptureKit window filters need the window server connection NSApplication sets up.
-        _ = NSApplication.shared
-        Task {
-            do {
-                let path = try await record(seconds: seconds, source: arguments[1])
-                print("PROBE-RECORD ok \(path)")
-                exit(0)
-            } catch {
-                print("PROBE-RECORD failed \(error)")
-                exit(1)
+        // `main()` runs on the main thread.
+        MainActor.assumeIsolated { _ = NSApplication.shared }
+        Task { @MainActor in exit(await record(seconds: seconds, source: arguments[1])) }
+        dispatchMain()
+    }
+
+    nonisolated static func runRecover() -> Never {
+        Task { @MainActor in
+            let controller = makeController()
+            await controller.recoverLeftovers()
+            if controller.lastRecoveryOutcomes.isEmpty { print("PROBE-RECOVER none") }
+            for outcome in controller.lastRecoveryOutcomes {
+                switch outcome {
+                case .recovered(let url): print("PROBE-RECOVER recovered \(url.path)")
+                case .damaged(let url): print("PROBE-RECOVER damaged \(url.path)")
+                }
             }
+            cleanUp()
+            exit(0)
         }
         dispatchMain()
     }
 
-    private static func record(seconds: Double, source: String) async throws -> String {
-        guard Permissions.screenGranted else { throw Failure(description: "PERMISSION: screen recording not granted") }
-        print("permissions: screen granted, microphone authorized: \(Permissions.microphoneStatus == .authorized)")
+    private static func makeController() -> RecordingController {
+        UserDefaults().removePersistentDomain(forName: defaultsSuite)
+        return RecordingController(store: SettingsStore(defaults: UserDefaults(suiteName: defaultsSuite)!))
+    }
 
-        let sources = try await SourceCatalog.load()
-        print("sources: displays \(sources.displays.map { "\($0.id) \"\($0.name)\"\($0.isMain ? " (main)" : "")" })")
-        print("sources: \(sources.windows.count) windows: "
-            + sources.windows.prefix(5).map { "\($0.id) \"\($0.title)\" (\($0.appName))" }.joined(separator: ", "))
-        print("microphones: \(SourceCatalog.microphones().map(\.name))")
+    private static func cleanUp() { UserDefaults().removePersistentDomain(forName: defaultsSuite) }
 
+    private static func record(seconds: Double, source: String) async -> Int32 {
+        defer { cleanUp() }
+        print("permissions: screen granted \(Permissions.screenGranted), "
+            + "microphone status \(Permissions.microphoneStatus.rawValue) (3 = authorized)")
+        let controller = makeController()
         var settings = Settings.default
         switch source {
         case "window":
-            guard let window = sources.windows.first else { throw Failure(description: "no listable window on screen") }
+            guard let window = try? await SourceCatalog.load().windows.first else {
+                print("PROBE-RECORD failed no listable window on screen")
+                return 1
+            }
             settings.videoSource = .window(id: window.id)
             print("source: window \(window.id) \"\(window.title)\" (\(window.appName))")
         case "audio":
@@ -92,68 +74,45 @@ enum ProbeRecord {
         default:
             print("source: main display")
         }
-        let hasVideo = settings.mode == .videoAndAudio
+        controller.settings = settings
 
-        try Destination.prepare(settings.outputFolder)
-        let finalURL = FileNaming.finalURL(folder: settings.outputFolder, date: Date(), timeZone: .current,
-                                           hasVideo: hasVideo,
-                                           exists: { FileManager.default.fileExists(atPath: $0.path) })
-        let workURL = FileNaming.workURL(forFinal: finalURL)
-
-        // The session decides the video size; the writer needs it, and the sink needs the writer.
-        let relay = Relay()
-        let session = try CaptureSession(settings: settings, sources: sources, sink: relay)
-        print("session: video \(session.videoSpec.map { "\($0.width)x\($0.height)@\($0.fps)" } ?? "none")")
-        let writer = try MovieWriter(url: workURL, video: session.videoSpec,
-                                     systemAudio: settings.systemAudio, microphone: settings.microphone)
-        let sink = Sink(writer: writer)
-        relay.target = sink
-
-        try await session.start()
-        print("capture: started, recording \(seconds) s")
-        try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-        await session.stop()
-        print("capture: stopped, buffers \(sink.summary)")
-        let (stopped, stopError) = sink.stoppedByItself
-        if stopped { print("capture: a stream stopped by itself: \(stopError.map { "\($0)" } ?? "no error")") }
-
-        let result = try await writer.finish()
-        print("writer: \(result), without track \(writer.sourcesWithoutTrack), degraded \(writer.degradedSources)")
-        guard case .written = result else { throw Failure(description: "nothing was written") }
-
-        try await Finalizer.finalize(workFile: workURL, to: finalURL, keepSeparateTracks: settings.keepSeparateTracks)
-        try FileManager.default.removeItem(at: workURL)
-        print("finalizer: wrote \(finalURL.lastPathComponent)")
-        return finalURL.path
-    }
-
-    /// Peak absolute amplitude of float32 PCM over all channels; 0 for other formats.
-    static func peak(_ buffer: CMSampleBuffer) -> Float {
-        guard let format = CMSampleBufferGetFormatDescription(buffer),
-              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format)?.pointee,
-              asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0 else { return 0 }
-        var peak: Float = 0
-        try? buffer.withAudioBufferList { list, _ in
-            for audioBuffer in list {
-                guard let data = audioBuffer.mData else { continue }
-                let samples = UnsafeBufferPointer(start: data.assumingMemoryBound(to: Float.self),
-                                                  count: Int(audioBuffer.mDataByteSize) / MemoryLayout<Float>.size)
-                for sample in samples { peak = max(peak, abs(sample)) }
+        await controller.start()
+        guard case .recording = controller.state else {
+            print("PROBE-RECORD failed start: \(controller.startProblem.map { "\($0)" } ?? "unknown")")
+            return 1
+        }
+        print("controller: recording \(seconds) s")
+        let end = Date().addingTimeInterval(seconds)
+        var lastLevels = Date.distantPast
+        while Date() < end, case .recording = controller.state {
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            if Date().timeIntervalSince(lastLevels) >= 2 {
+                lastLevels = Date()
+                print(String(format: "levels: t=%ds system %.1f dB, microphone %.1f dB, warnings %@",
+                             controller.elapsedSeconds, controller.systemLevelDB, controller.microphoneLevelDB,
+                             "\(controller.warnings.map { "\($0)" }.sorted())"))
             }
         }
-        return peak
-    }
+        await controller.stop()
+        print("controller: first stop returned, state \(controller.state)")
+        await controller.stop()
+        print("controller: second stop returned, state \(controller.state)")
+        print("warnings seen: \(controller.warningsSeen.map { "\($0)" }.sorted())")
+        if let problem = controller.startProblem { print("start problem: \(problem)") }
 
-    /// Forwards to a sink set after the session exists (the writer needs the session's video size).
-    private final class Relay: CaptureSink, @unchecked Sendable {
-        private let lock = NSLock()
-        private var _target: CaptureSink?
-        var target: CaptureSink? {
-            get { lock.withLock { _target } }
-            set { lock.withLock { _target = newValue } }
+        switch controller.lastOutcome {
+        case .saved(let url)?:
+            let exists = FileManager.default.fileExists(atPath: url.path)
+            print("file exists after double stop: \(exists)")
+            guard exists else {
+                print("PROBE-RECORD failed file vanished: \(url.path)")
+                return 1
+            }
+            print("PROBE-RECORD ok \(url.path)")
+            return 0
+        case let outcome:
+            print("PROBE-RECORD failed \(outcome.map { "\($0)" } ?? "no outcome")")
+            return 1
         }
-
-        func capture(_ kind: SampleKind, _ buffer: CMSampleBuffer) { target?.capture(kind, buffer) }
-        func captureStopped(error: Error?) { target?.captureStopped(error: error) }
     }
 }
