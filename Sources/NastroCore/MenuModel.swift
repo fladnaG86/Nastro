@@ -3,6 +3,7 @@ import Foundation
 /// What the menu bar item shows.
 public struct MenuBarLabel: Equatable, Sendable {
     public static let warningSymbol = "exclamationmark.triangle.fill"
+    public static let criticalSymbol = "xmark.octagon.fill"
 
     public var symbol: String
     public var isRed: Bool
@@ -10,29 +11,44 @@ public struct MenuBarLabel: Equatable, Sendable {
     public var elapsed: String?
     /// Adds `warningSymbol` next to the main symbol.
     public var showsWarning: Bool
+    /// Adds the red `criticalSymbol` next to the main symbol.
+    public var showsCritical: Bool
 
-    public init(symbol: String, isRed: Bool, elapsed: String?, showsWarning: Bool) {
+    public init(symbol: String, isRed: Bool, elapsed: String?, showsWarning: Bool, showsCritical: Bool = false) {
         self.symbol = symbol
         self.isRed = isRed
         self.elapsed = elapsed
         self.showsWarning = showsWarning
+        self.showsCritical = showsCritical
     }
 
-    public static func make(state: RecorderState, elapsedSeconds: Int, attention: Bool) -> MenuBarLabel {
+    public static func make(state: RecorderState, elapsedSeconds: Int, attention: Bool,
+                            critical: Bool = false) -> MenuBarLabel {
         switch state {
         case .idle, .starting:
-            return MenuBarLabel(symbol: "record.circle", isRed: false, elapsed: nil, showsWarning: attention)
+            return MenuBarLabel(symbol: "record.circle", isRed: false, elapsed: nil, showsWarning: attention,
+                                showsCritical: critical)
         case .recording:
             return MenuBarLabel(symbol: "record.circle.fill", isRed: true,
-                                elapsed: TimeFormat.elapsed(elapsedSeconds), showsWarning: attention)
+                                elapsed: TimeFormat.elapsed(elapsedSeconds), showsWarning: attention,
+                                showsCritical: critical)
         case .finalizing:
-            return MenuBarLabel(symbol: "hourglass", isRed: false, elapsed: nil, showsWarning: attention)
+            return MenuBarLabel(symbol: "hourglass", isRed: false, elapsed: nil, showsWarning: attention,
+                                showsCritical: critical)
         }
     }
 
-    /// A live warning, or a problem the menu explains (for example a missing permission).
+    /// A problem the menu explains (for example a missing permission). Warnings never raise the
+    /// triangle: silence is most of a call, critical warnings have their own state
+    /// (`isCritical(warnings:)`), and the others stay in the panel. `warnings` is kept for
+    /// callers written before that rule.
     public static func needsAttention(warnings: Set<Warning>, problem: StartProblem?) -> Bool {
-        !warnings.isEmpty || problem != nil
+        problem != nil
+    }
+
+    /// A voice is not being recorded: the menu bar shows the red `criticalSymbol`.
+    public static func isCritical(warnings: Set<Warning>) -> Bool {
+        warnings.contains(where: \.isCritical)
     }
 }
 
@@ -89,6 +105,17 @@ public enum MenuLayout {
 
     public static func choicesEditable(_ state: RecorderState) -> Bool { state == .idle }
 
+    /// Whether an audio source's checkbox can change: in audio-only mode the only enabled
+    /// source cannot be unchecked (there would be nothing to record).
+    public static func canToggleAudioSource(_ channel: AudioChannel, mode: RecordingMode,
+                                            systemAudio: Bool, microphone: Bool) -> Bool {
+        guard mode == .audioOnly else { return true }
+        switch channel {
+        case .system: return !(systemAudio && !microphone)
+        case .microphone: return !(microphone && !systemAudio)
+        }
+    }
+
     public static func startEnabled(_ state: RecorderState) -> Bool { state == .idle }
 
     /// The last start problem, or a missing screen permission before any attempt.
@@ -131,9 +158,12 @@ public enum MeterWarnings {
         return order.filter(warnings.contains)
     }
 
-    /// A voice is missing from the file: must be impossible to miss.
-    public static func isCritical(_ warning: Warning) -> Bool {
-        warning == .systemAudioNotRecorded || warning == .microphoneNotRecorded
+    /// A voice is missing from the file: must be impossible to miss (same rule as the menu bar).
+    public static func isCritical(_ warning: Warning) -> Bool { warning.isCritical }
+
+    /// Warnings shown as their own rows in the recording panel, not under a meter.
+    public static func panelRows(in warnings: Set<Warning>) -> [Warning] {
+        [Warning.audioDropouts].filter(warnings.contains)
     }
 }
 

@@ -41,7 +41,8 @@ public enum L10n {
         case startFailed, noFirstFrame
         // Warnings
         case warningSystemAudioSilent, warningMicrophoneSilent, warningMicrophoneLost
-        case warningSystemAudioNotRecorded, warningMicrophoneNotRecorded
+        case warningSystemAudioNotRecorded, warningMicrophoneNotRecorded, warningAudioDropouts
+        case noAudio, recordingNotSaved
         // Start problems
         case problemScreenPermission, problemMicrophonePermission, problemFolder
         case problemSourceUnavailable, problemOther
@@ -109,6 +110,9 @@ public enum L10n {
         case .warningMicrophoneLost: return "Microfono scollegato"
         case .warningSystemAudioNotRecorded: return "L'audio di sistema non viene registrato"
         case .warningMicrophoneNotRecorded: return "Il microfono non viene registrato"
+        case .warningAudioDropouts: return "Alcuni frammenti audio sono andati persi"
+        case .noAudio: return "Nessun audio entro 5 secondi: registrazione annullata."
+        case .recordingNotSaved: return "La registrazione non è stata salvata."
         case .problemScreenPermission: return "Serve il permesso di Registrazione schermo."
         case .problemMicrophonePermission: return "Serve il permesso di accesso al Microfono."
         case .problemFolder: return "La cartella delle registrazioni non è scrivibile."
@@ -172,6 +176,9 @@ public enum L10n {
         case .warningMicrophoneLost: return "Microphone disconnected"
         case .warningSystemAudioNotRecorded: return "System audio is not being recorded"
         case .warningMicrophoneNotRecorded: return "The microphone is not being recorded"
+        case .warningAudioDropouts: return "Some audio was lost"
+        case .noAudio: return "No audio within 5 seconds: recording cancelled."
+        case .recordingNotSaved: return "The recording could not be saved."
         case .problemScreenPermission: return "Screen Recording permission is required."
         case .problemMicrophonePermission: return "Microphone permission is required."
         case .problemFolder: return "The recordings folder is not writable."

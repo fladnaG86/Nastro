@@ -6,6 +6,16 @@ public enum Warning: Hashable, Sendable {
     /// The source is enabled but its audio is not going into the file (no track, or its
     /// track ended because the format changed).
     case systemAudioNotRecorded, microphoneNotRecorded
+    /// Some audio buffers were lost (the writer could not keep up); not tied to one meter.
+    case audioDropouts
+
+    /// A voice is not going into the file: shown with the critical menu bar state and in red.
+    public var isCritical: Bool {
+        switch self {
+        case .systemAudioNotRecorded, .microphoneNotRecorded, .microphoneLost: return true
+        case .systemAudioSilent, .microphoneSilent, .audioDropouts: return false
+        }
+    }
 
     public var messageKey: L10n.Key {
         switch self {
@@ -14,15 +24,16 @@ public enum Warning: Hashable, Sendable {
         case .microphoneLost: return .warningMicrophoneLost
         case .systemAudioNotRecorded: return .warningSystemAudioNotRecorded
         case .microphoneNotRecorded: return .warningMicrophoneNotRecorded
+        case .audioDropouts: return .warningAudioDropouts
         }
     }
 
-    /// Silence is only shown in the menu; a voice or source that is not being recorded is
-    /// also notified.
+    /// Silence and lost audio are only shown in the panel; a voice or source that is not being
+    /// recorded is also notified.
     public var notifies: Bool {
         switch self {
         case .microphoneLost, .systemAudioNotRecorded, .microphoneNotRecorded: return true
-        case .systemAudioSilent, .microphoneSilent: return false
+        case .systemAudioSilent, .microphoneSilent, .audioDropouts: return false
         }
     }
 
@@ -34,6 +45,7 @@ public enum Warning: Hashable, Sendable {
         case .microphoneLost: return 2
         case .microphoneSilent: return 3
         case .systemAudioSilent: return 4
+        case .audioDropouts: return 5
         }
     }
 }
@@ -72,11 +84,14 @@ public struct AudioSourceFacts: Equatable, Sendable {
     public var samplesStopped: Bool
     /// The writer has no track for it, or its track ended.
     public var notRecorded: Bool
+    /// No sample at all has arrived since the start, and the grace period has passed.
+    public var neverArrived: Bool
 
-    public init(silent: Bool, samplesStopped: Bool, notRecorded: Bool) {
+    public init(silent: Bool, samplesStopped: Bool, notRecorded: Bool, neverArrived: Bool = false) {
         self.silent = silent
         self.samplesStopped = samplesStopped
         self.notRecorded = notRecorded
+        self.neverArrived = neverArrived
     }
 }
 
@@ -87,19 +102,37 @@ public enum RecordingRules {
     /// Seconds a video recording may go without its first frame.
     public static let firstFrameLimit: TimeInterval = 5
 
-    /// `nil` facts = the source is disabled. Per source only the most serious warning is kept:
-    /// not recorded, then (microphone only) lost, then silent.
-    public static func warnings(systemAudio: AudioSourceFacts?, microphone: AudioSourceFacts?) -> Set<Warning> {
+    /// True when no sample has arrived (`lastSampleAt` nil) `grace` seconds after the start.
+    public static func samplesNeverArrived(lastSampleAt: TimeInterval?, secondsSinceStart: TimeInterval,
+                                           grace: TimeInterval = samplesGrace) -> Bool {
+        lastSampleAt == nil && secondsSinceStart >= grace
+    }
+
+    /// An audio-only recording that got no sample from any enabled source within `limit`
+    /// seconds: nothing usable is being recorded.
+    public static func audioOverdue(expectsVideo: Bool, sawAudio: Bool, secondsSinceStart: TimeInterval,
+                                    limit: TimeInterval = samplesGrace) -> Bool {
+        !expectsVideo && !sawAudio && secondsSinceStart >= limit
+    }
+
+    /// `nil` facts = the source is disabled. Per source only the most serious warning is kept.
+    /// A source that never delivered, or whose track is missing or ended, is not recorded;
+    /// samples that stopped arriving mean the same for system audio and "lost" for the
+    /// microphone (both critical); otherwise silence. `audioDropouts` adds its own warning.
+    public static func warnings(systemAudio: AudioSourceFacts?, microphone: AudioSourceFacts?,
+                                audioDropouts: Bool = false) -> Set<Warning> {
         var result: Set<Warning> = []
         if let system = systemAudio {
-            if system.notRecorded { result.insert(.systemAudioNotRecorded) }
-            else if system.silent { result.insert(.systemAudioSilent) }
+            if system.notRecorded || system.neverArrived || system.samplesStopped {
+                result.insert(.systemAudioNotRecorded)
+            } else if system.silent { result.insert(.systemAudioSilent) }
         }
         if let mic = microphone {
-            if mic.notRecorded { result.insert(.microphoneNotRecorded) }
+            if mic.notRecorded || mic.neverArrived { result.insert(.microphoneNotRecorded) }
             else if mic.samplesStopped { result.insert(.microphoneLost) }
             else if mic.silent { result.insert(.microphoneSilent) }
         }
+        if audioDropouts { result.insert(.audioDropouts) }
         return result
     }
 
@@ -175,6 +208,12 @@ public enum RecordingRules {
         case .streamError: return .stoppedStreamError
         case .diskFull: return .stoppedDiskFull
         }
+    }
+
+    /// The notification after the writer failed: the work file is said to be kept (with its
+    /// path) only when it exists; otherwise the recording could not be saved.
+    public static func writeFailureMessageKeys(workFileExists: Bool) -> [L10n.Key] {
+        [.writeFailed, workFileExists ? .workFileKept : .recordingNotSaved]
     }
 
     /// Finalizing writes a copy about as large as the work file before the work file is

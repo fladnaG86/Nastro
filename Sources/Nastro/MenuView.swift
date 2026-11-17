@@ -13,6 +13,8 @@ struct PanelStatus {
     /// The problem to explain (see `MenuLayout.displayedProblem`).
     var problem: StartProblem?
     var hotKey: HotKeyOutcome
+    /// The running recording's settings (meters and warnings follow these while recording).
+    var recordingSettings: NastroCore.Settings? = nil
 }
 
 /// The source lists offered in the panel.
@@ -202,12 +204,20 @@ struct MenuView: View {
             Toggle(isOn: $settings.systemAudio) {
                 Text(L10n.t(.systemAudio))
             }
+            .disabled(!canToggle(.system))
             Toggle(isOn: $settings.microphone) {
                 Text(microphoneTitle).lineLimit(1).truncationMode(.middle)
             }
+            .disabled(!canToggle(.microphone))
         }
         .toggleStyle(.checkbox)
         .disabled(!editable)
+    }
+
+    /// Audio-only mode: the only enabled source cannot be unchecked.
+    private func canToggle(_ channel: AudioChannel) -> Bool {
+        MenuLayout.canToggleAudioSource(channel, mode: settings.mode, systemAudio: settings.systemAudio,
+                                        microphone: settings.microphone)
     }
 
     private var microphoneTitle: String {
@@ -239,16 +249,22 @@ struct MenuView: View {
         }
     }
 
+    /// Meters for the sources of the recording that runs (its snapshot), then the warnings
+    /// that belong to no meter.
     @ViewBuilder
     private var metersRow: some View {
+        let recording = status.recordingSettings ?? settings
         VStack(alignment: .leading, spacing: 12) {
-            if settings.systemAudio {
+            if recording.systemAudio {
                 MeterRow(title: L10n.t(.systemAudio), db: status.systemLevelDB,
                          warnings: MeterWarnings.for(.system, in: status.warnings))
             }
-            if settings.microphone {
+            if recording.microphone {
                 MeterRow(title: L10n.t(.microphone), db: status.microphoneLevelDB,
                          warnings: MeterWarnings.for(.microphone, in: status.warnings))
+            }
+            ForEach(MeterWarnings.panelRows(in: status.warnings), id: \.self) { warning in
+                WarningText(warning: warning)
             }
         }
     }
@@ -363,8 +379,8 @@ private struct WarningText: View {
     }
 }
 
-/// The menu bar item: one image (symbol, red while recording, plus the warning triangle) and
-/// the running time.
+/// The menu bar item: one image (symbol, red while recording, plus the warning triangle or the
+/// red critical octagon) and the running time.
 struct MenuBarLabelView: View {
     let label: MenuBarLabel
 
@@ -391,6 +407,10 @@ struct MenuBarLabelView: View {
         if label.showsWarning, let triangle = symbol(MenuBarLabel.warningSymbol, color: colored ? .systemOrange : nil) {
             parts.append(triangle)
         }
+        // Always red, whatever the state: a voice is not being recorded.
+        if label.showsCritical, let octagon = symbol(MenuBarLabel.criticalSymbol, color: .systemRed) {
+            parts.append(octagon)
+        }
         let spacing: CGFloat = 3
         let width = parts.map(\.size.width).reduce(0, +) + spacing * CGFloat(max(parts.count - 1, 0))
         let height = parts.map(\.size.height).max() ?? pointSize
@@ -403,8 +423,8 @@ struct MenuBarLabelView: View {
             }
             return true
         }
-        // Template images follow the menu bar's light or dark appearance; the red one keeps its colours.
-        image.isTemplate = !colored
+        // Template images follow the menu bar's light or dark appearance; a coloured one keeps its colours.
+        image.isTemplate = !colored && !label.showsCritical
         return image
     }
 }

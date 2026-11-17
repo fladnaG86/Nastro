@@ -32,10 +32,33 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(MenuBarLabel.warningSymbol, "exclamationmark.triangle.fill")
     }
 
-    func testAttentionFromWarningsOrProblem() {
+    func testAttentionOnlyFromAProblem() {
+        // F1: warnings no longer raise the triangle (silence is most of a call): critical ones
+        // have their own state, the others stay in the panel.
         XCTAssertFalse(MenuBarLabel.needsAttention(warnings: [], problem: nil))
-        XCTAssertTrue(MenuBarLabel.needsAttention(warnings: [.microphoneSilent], problem: nil))
+        XCTAssertFalse(MenuBarLabel.needsAttention(warnings: [.microphoneSilent, .systemAudioSilent], problem: nil))
+        XCTAssertFalse(MenuBarLabel.needsAttention(warnings: [.audioDropouts], problem: nil))
+        XCTAssertFalse(MenuBarLabel.needsAttention(warnings: [.microphoneNotRecorded], problem: nil))
         XCTAssertTrue(MenuBarLabel.needsAttention(warnings: [], problem: .screenPermission))
+    }
+
+    func testCriticalStateOnlyFromCriticalWarnings() {
+        XCTAssertFalse(MenuBarLabel.isCritical(warnings: []))
+        XCTAssertFalse(MenuBarLabel.isCritical(warnings: [.microphoneSilent, .systemAudioSilent, .audioDropouts]))
+        XCTAssertTrue(MenuBarLabel.isCritical(warnings: [.systemAudioNotRecorded]))
+        XCTAssertTrue(MenuBarLabel.isCritical(warnings: [.microphoneNotRecorded, .microphoneSilent]))
+        XCTAssertTrue(MenuBarLabel.isCritical(warnings: [.microphoneLost]))
+    }
+
+    func testLabelCriticalStateLooksDifferent() {
+        let ordinary = MenuBarLabel.make(state: .recording(since: since), elapsedSeconds: 1, attention: false)
+        let critical = MenuBarLabel.make(state: .recording(since: since), elapsedSeconds: 1, attention: false,
+                                         critical: true)
+        XCTAssertFalse(ordinary.showsCritical)
+        XCTAssertTrue(critical.showsCritical)
+        XCTAssertNotEqual(ordinary, critical)
+        XCTAssertEqual(MenuBarLabel.criticalSymbol, "xmark.octagon.fill")
+        XCTAssertNotEqual(MenuBarLabel.criticalSymbol, MenuBarLabel.warningSymbol)
     }
 
     // MARK: Sections
@@ -107,14 +130,43 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(MeterWarnings.for(.microphone, in: all),
                        [.microphoneNotRecorded, .microphoneLost, .microphoneSilent])
         XCTAssertEqual(MeterWarnings.for(.microphone, in: [.systemAudioSilent]), [])
+        XCTAssertEqual(MeterWarnings.for(.system, in: [.audioDropouts]), [])
+        XCTAssertEqual(MeterWarnings.for(.microphone, in: [.audioDropouts]), [])
+    }
+
+    func testPanelRowWarningsAreNotUnderAMeter() {
+        // F3: lost audio is its own row in the recording panel.
+        let all: Set<Warning> = [.systemAudioSilent, .microphoneLost, .audioDropouts]
+        XCTAssertEqual(MeterWarnings.panelRows(in: all), [.audioDropouts])
+        XCTAssertEqual(MeterWarnings.panelRows(in: [.microphoneSilent]), [])
     }
 
     func testCriticalWarnings() {
+        // The panel and the menu bar agree on what is critical (F1).
         XCTAssertTrue(MeterWarnings.isCritical(.systemAudioNotRecorded))
         XCTAssertTrue(MeterWarnings.isCritical(.microphoneNotRecorded))
-        XCTAssertFalse(MeterWarnings.isCritical(.microphoneLost))
+        XCTAssertTrue(MeterWarnings.isCritical(.microphoneLost))
         XCTAssertFalse(MeterWarnings.isCritical(.microphoneSilent))
         XCTAssertFalse(MeterWarnings.isCritical(.systemAudioSilent))
+        XCTAssertFalse(MeterWarnings.isCritical(.audioDropouts))
+    }
+
+    // MARK: Audio sources
+
+    func testLastAudioSourceCannotBeUncheckedInAudioOnly() {
+        // M4: in audio-only mode the only enabled source's checkbox is disabled.
+        func can(_ channel: AudioChannel, _ mode: RecordingMode, system: Bool, mic: Bool) -> Bool {
+            MenuLayout.canToggleAudioSource(channel, mode: mode, systemAudio: system, microphone: mic)
+        }
+        XCTAssertFalse(can(.system, .audioOnly, system: true, mic: false))
+        XCTAssertTrue(can(.microphone, .audioOnly, system: true, mic: false))
+        XCTAssertFalse(can(.microphone, .audioOnly, system: false, mic: true))
+        XCTAssertTrue(can(.system, .audioOnly, system: true, mic: true))
+        XCTAssertTrue(can(.microphone, .audioOnly, system: true, mic: true))
+        // Nothing enabled (left so by video mode): both can be checked.
+        XCTAssertTrue(can(.system, .audioOnly, system: false, mic: false))
+        // Video mode: no restriction.
+        XCTAssertTrue(can(.system, .videoAndAudio, system: true, mic: false))
     }
 
     // MARK: Hotkey

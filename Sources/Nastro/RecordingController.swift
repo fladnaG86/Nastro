@@ -11,8 +11,10 @@ enum RecordingOutcome: Equatable {
     /// The work file stays on disk (finalization failed, skipped for lack of room, or the
     /// writer failed); recovery at the next launch picks it up.
     case keptWorkFile(URL)
-    /// Stopped without keeping anything (no first video frame).
+    /// Stopped without keeping anything (no first video frame, or no audio in audio-only mode).
     case discarded
+    /// The writer failed before any file existed: nothing was saved.
+    case notSaved
     case notStarted(StartProblem)
 }
 
@@ -26,6 +28,9 @@ final class RecordingController: ObservableObject {
     @Published private(set) var microphoneLevelDB: Float = AudioLevel.floorDB
     @Published private(set) var warnings: Set<Warning> = []
     @Published private(set) var startProblem: StartProblem?
+    /// The settings of the recording that is running (its snapshot), nil otherwise. The panel
+    /// shows meters and warnings for these, not for the live `settings`.
+    @Published private(set) var recordingSettings: Settings?
     /// Changes apply to the next recording, never to the one running.
     @Published var settings: Settings {
         didSet { store.save(settings.validated()) }
@@ -159,6 +164,7 @@ final class RecordingController: ObservableObject {
         sink.begin(at: startedAt)
         active = Active(settings: s, session: session, writer: writer, sink: sink,
                         workURL: workURL, finalURL: finalURL, startedAt: startedAt)
+        recordingSettings = s
         _ = machine.apply(.started(at: Date()))
         state = machine.state
         ticker = Task { [weak self] in
@@ -225,9 +231,18 @@ final class RecordingController: ObservableObject {
         elapsedSeconds = Int(seconds)
         let facts = active.sink.snapshot(at: now)
 
-        if RecordingRules.firstFrameOverdue(expectsVideo: active.session.videoSpec != nil,
-                                            sawVideo: facts.sawVideo, secondsSinceStart: seconds) {
-            await abandonWithoutFirstFrame(active)
+        let expectsVideo = active.session.videoSpec != nil
+        if RecordingRules.firstFrameOverdue(expectsVideo: expectsVideo, sawVideo: facts.sawVideo,
+                                            secondsSinceStart: seconds) {
+            await abandon(active, messageKey: .noFirstFrame)
+            return
+        }
+        let enabledAudio = [active.settings.systemAudio ? SampleKind.systemAudio : nil,
+                            active.settings.microphone ? SampleKind.microphone : nil].compactMap { $0 }
+        if RecordingRules.audioOverdue(expectsVideo: expectsVideo,
+                                       sawAudio: enabledAudio.contains { facts.lastSampleAt[$0] != nil },
+                                       secondsSinceStart: seconds) {
+            await abandon(active, messageKey: .noAudio)
             return
         }
 
@@ -236,17 +251,18 @@ final class RecordingController: ObservableObject {
         if facts.secondsSinceSample(.microphone, now: now) > 0.5 { microphoneLevelDB = AudioLevel.floorDB }
 
         let lost = active.writer.sourcesWithoutTrack.union(active.writer.degradedSources)
+        func sourceFacts(_ kind: SampleKind, silent: Bool) -> AudioSourceFacts {
+            let last = facts.lastSampleAt[kind]
+            return AudioSourceFacts(silent: silent,
+                                    samplesStopped: RecordingRules.samplesStopped(lastSampleAt: last, now: now),
+                                    notRecorded: lost.contains(kind),
+                                    neverArrived: RecordingRules.samplesNeverArrived(lastSampleAt: last,
+                                                                                     secondsSinceStart: seconds))
+        }
         let current = RecordingRules.warnings(
-            systemAudio: active.settings.systemAudio
-                ? AudioSourceFacts(silent: facts.systemSilent, samplesStopped: false,
-                                   notRecorded: lost.contains(.systemAudio))
-                : nil,
-            microphone: active.settings.microphone
-                ? AudioSourceFacts(silent: facts.microphoneSilent,
-                                   samplesStopped: RecordingRules.samplesStopped(
-                                       lastSampleAt: facts.lastSampleAt[.microphone], now: now),
-                                   notRecorded: lost.contains(.microphone))
-                : nil)
+            systemAudio: active.settings.systemAudio ? sourceFacts(.systemAudio, silent: facts.systemSilent) : nil,
+            microphone: active.settings.microphone ? sourceFacts(.microphone, silent: facts.microphoneSilent) : nil,
+            audioDropouts: !active.writer.droppedAudioBuffers.isEmpty)
         if current != warnings { warnings = current }
         for warning in RecordingRules.warningsToNotify(current: current, alreadyNotified: warningsSeen) {
             Notifier.failed(L10n.t(warning.messageKey))
@@ -272,6 +288,7 @@ final class RecordingController: ObservableObject {
             systemLevelDB = AudioLevel.floorDB
             microphoneLevelDB = AudioLevel.floorDB
             warnings = []
+            recordingSettings = nil
             state = machine.state
         }
         let fileManager = FileManager.default
@@ -284,7 +301,14 @@ final class RecordingController: ObservableObject {
                 try? fileManager.removeItem(at: active.workURL)
                 return end(.discarded, finalized: false)
             }
-            Notifier.failed(L10n.t(.writeFailed) + " " + L10n.t(.workFileKept), file: active.workURL)
+            let exists = fileManager.fileExists(atPath: active.workURL.path)
+            let message = RecordingRules.writeFailureMessageKeys(workFileExists: exists)
+                .map { L10n.t($0) }.joined(separator: " ")
+            guard exists else {
+                Notifier.failed(message)
+                return end(.notSaved, finalized: false)
+            }
+            Notifier.failed(message, file: active.workURL)
             return end(.keptWorkFile(active.workURL), finalized: false)
         }
         if discard {
@@ -318,8 +342,9 @@ final class RecordingController: ObservableObject {
         _ = machine.apply(finalized ? .finalized : .finalizeFailed)
     }
 
-    /// Video mode with no frame within the limit: nothing usable is being recorded.
-    private func abandonWithoutFirstFrame(_ active: Active) async {
+    /// Nothing usable is being recorded (video mode with no frame, or audio-only mode with no
+    /// audio, within the limit): stop, keep no file, explain with `messageKey`.
+    private func abandon(_ active: Active, messageKey: L10n.Key) async {
         _ = machine.apply(.stopRequested(.streamError))
         state = machine.state
         let task = Task { await self.finish(active, reason: .streamError, discard: true) }
@@ -327,7 +352,7 @@ final class RecordingController: ObservableObject {
         await task.value
         stopTask = nil
         startProblem = problem(for: .noFirstFrame, active.settings)
-        Notifier.failed(L10n.t(.noFirstFrame))
+        Notifier.failed(L10n.t(messageKey))
     }
 
     private func failStart(_ problem: StartProblem) {

@@ -36,6 +36,53 @@ final class RecordingRulesTests: XCTestCase {
         XCTAssertEqual(RecordingRules.warnings(systemAudio: gone, microphone: nil), [.systemAudioNotRecorded])
     }
 
+    func testSystemAudioWhoseSamplesStopIsNotRecorded() {
+        // F1: system audio samples stopped arriving → critical, not silence.
+        let stopped = AudioSourceFacts(silent: true, samplesStopped: true, notRecorded: false)
+        XCTAssertEqual(RecordingRules.warnings(systemAudio: stopped, microphone: quiet), [.systemAudioNotRecorded])
+    }
+
+    func testSourceThatNeverDeliveredIsNotRecorded() {
+        // F1: enabled, no sample 5 s after start, independent of the writer's tracks.
+        let never = AudioSourceFacts(silent: true, samplesStopped: false, notRecorded: false, neverArrived: true)
+        XCTAssertEqual(RecordingRules.warnings(systemAudio: never, microphone: never),
+                       [.systemAudioNotRecorded, .microphoneNotRecorded])
+        XCTAssertEqual(RecordingRules.warnings(systemAudio: quiet, microphone: never), [.microphoneNotRecorded])
+    }
+
+    func testSamplesNeverArrived() {
+        XCTAssertFalse(RecordingRules.samplesNeverArrived(lastSampleAt: nil, secondsSinceStart: 4.9))
+        XCTAssertTrue(RecordingRules.samplesNeverArrived(lastSampleAt: nil, secondsSinceStart: 5))
+        XCTAssertFalse(RecordingRules.samplesNeverArrived(lastSampleAt: 101, secondsSinceStart: 60))
+    }
+
+    func testAudioOnlyWithoutAnyAudioIsOverdue() {
+        // F1: audio-only recording with no sample from any enabled source within 5 s.
+        XCTAssertFalse(RecordingRules.audioOverdue(expectsVideo: false, sawAudio: false, secondsSinceStart: 4.9))
+        XCTAssertTrue(RecordingRules.audioOverdue(expectsVideo: false, sawAudio: false, secondsSinceStart: 5))
+        XCTAssertFalse(RecordingRules.audioOverdue(expectsVideo: false, sawAudio: true, secondsSinceStart: 60))
+        XCTAssertFalse(RecordingRules.audioOverdue(expectsVideo: true, sawAudio: false, secondsSinceStart: 60))
+    }
+
+    func testAudioDropoutsWarning() {
+        // F3: lost audio buffers → one non-critical warning that is not notified.
+        XCTAssertEqual(RecordingRules.warnings(systemAudio: quiet, microphone: quiet, audioDropouts: true),
+                       [.audioDropouts])
+        XCTAssertEqual(RecordingRules.warnings(systemAudio: nil, microphone: quiet, audioDropouts: true),
+                       [.audioDropouts])
+        XCTAssertFalse(Warning.audioDropouts.notifies)
+        XCTAssertFalse(Warning.audioDropouts.isCritical)
+        XCTAssertEqual(RecordingRules.warningsToNotify(current: [.audioDropouts], alreadyNotified: []), [])
+    }
+
+    func testCriticalWarnings() {
+        XCTAssertTrue(Warning.systemAudioNotRecorded.isCritical)
+        XCTAssertTrue(Warning.microphoneNotRecorded.isCritical)
+        XCTAssertTrue(Warning.microphoneLost.isCritical)
+        XCTAssertFalse(Warning.systemAudioSilent.isCritical)
+        XCTAssertFalse(Warning.microphoneSilent.isCritical)
+    }
+
     func testSamplesStopped() {
         // Never delivered: not "stopped" (a source that never shows up gets no track instead).
         XCTAssertFalse(RecordingRules.samplesStopped(lastSampleAt: nil, now: 100))
@@ -150,11 +197,18 @@ final class RecordingRulesTests: XCTestCase {
         XCTAssertTrue(RecordingRules.hasRoomToFinalize(freeBytes: nil, workFileBytes: 1_000))
     }
 
+    func testWriteFailureMessageOnlyMentionsAWorkFileThatExists() {
+        // M5: the writer failed before the file existed → no "kept" path, just "not saved".
+        XCTAssertEqual(RecordingRules.writeFailureMessageKeys(workFileExists: true), [.writeFailed, .workFileKept])
+        XCTAssertEqual(RecordingRules.writeFailureMessageKeys(workFileExists: false),
+                       [.writeFailed, .recordingNotSaved])
+    }
+
     // MARK: texts
 
     func testEveryWarningAndProblemHasItsOwnText() {
         let warnings: [Warning] = [.systemAudioSilent, .microphoneSilent, .microphoneLost,
-                                   .systemAudioNotRecorded, .microphoneNotRecorded]
+                                   .systemAudioNotRecorded, .microphoneNotRecorded, .audioDropouts]
         XCTAssertEqual(Set(warnings.map(\.messageKey)).count, warnings.count)
         let problems: [StartProblem] = [.screenPermission, .microphonePermission, .folder, .sourceUnavailable, .other]
         XCTAssertEqual(Set(problems.map(\.messageKey)).count, problems.count)

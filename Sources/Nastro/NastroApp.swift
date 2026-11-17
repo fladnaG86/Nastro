@@ -4,7 +4,7 @@ import NastroCore
 import NastroMedia
 
 /// Entry point: `Nastro --probe-record <seconds> <display|window|audio>`,
-/// `Nastro --probe-recover` and `Nastro --preview <idle|recording|problem|settings|settings-recording>` run
+/// `Nastro --probe-recover` and `Nastro --preview <idle|recording|problem|settings|settings-recording|menubar>` run
 /// diagnostics instead of the menu bar app.
 @main
 enum NastroMain {
@@ -90,7 +90,8 @@ private struct LiveMenuBarLabel: View {
                                                   screenGranted: app.screenGranted)
         MenuBarLabelView(label: MenuBarLabel.make(
             state: controller.state, elapsedSeconds: controller.elapsedSeconds,
-            attention: MenuBarLabel.needsAttention(warnings: controller.warnings, problem: problem)))
+            attention: MenuBarLabel.needsAttention(warnings: controller.warnings, problem: problem),
+            critical: MenuBarLabel.isCritical(warnings: controller.warnings)))
     }
 }
 
@@ -117,7 +118,7 @@ private struct LiveMenuPanel: View {
                     warnings: controller.warnings,
                     problem: MenuLayout.displayedProblem(startProblem: controller.startProblem,
                                                          screenGranted: app.screenGranted),
-                    hotKey: app.hotKey)
+                    hotKey: app.hotKey, recordingSettings: controller.recordingSettings)
     }
 
     private var actions: PanelActions {
