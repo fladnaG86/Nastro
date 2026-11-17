@@ -145,7 +145,16 @@ private struct LiveMenuPanel: View {
         app.screenGranted = Permissions.screenGranted
         // Only while idle: the lists are not shown otherwise.
         guard controller.state == .idle else { return }
-        sources = await PanelSources.load()
+        let loaded = await PanelSources.load()
+        sources = loaded
+        // A saved window that has closed: record the main display instead, as the picker shows.
+        // `controller.state` is read again after the await, so a running recording is never touched.
+        if let replacement = SourceChoice.sourceToSave(
+            saved: controller.settings.videoSource,
+            windowIDs: loaded.screenListsLoaded ? loaded.windows.map(\.id) : nil,
+            state: controller.state) {
+            controller.settings.videoSource = replacement
+        }
     }
 }
 

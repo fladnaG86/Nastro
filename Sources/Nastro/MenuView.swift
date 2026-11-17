@@ -21,6 +21,9 @@ struct PanelSources {
     var windows: [WindowInfo] = []
     var microphones: [MicInfo] = []
     var defaultMicrophoneName: String?
+    /// False when displays and windows could not be loaded (no screen access): the empty lists
+    /// then say nothing about which sources exist.
+    var screenListsLoaded = false
 
     /// Microphones always; displays and windows only when screen access is already granted, so
     /// loading never triggers a permission prompt.
@@ -30,6 +33,7 @@ struct PanelSources {
         if Permissions.screenGranted, let loaded = try? await SourceCatalog.load() {
             sources.displays = loaded.displays
             sources.windows = loaded.windows
+            sources.screenListsLoaded = true
         }
         return sources
     }

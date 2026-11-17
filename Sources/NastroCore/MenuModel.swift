@@ -213,8 +213,10 @@ public enum SourceChoice {
 
     /// The picker entry to show for the saved source. Entries are the main display as
     /// `.mainDisplay`, other displays by id and windows by id. A saved display that is now the
-    /// main one, or a saved display or window that is gone, shows as the main display (the
-    /// capture falls back to it); the saved setting itself is not changed.
+    /// main one, or a saved display that is gone, shows as the main display (the capture falls
+    /// back to it for a missing display). A gone window also shows as the main display, but the
+    /// capture does not fall back for windows: `sourceToSave` rewrites such a setting when the
+    /// panel reloads, so the picker and the next recording agree.
     public static func pickerSelection(saved: VideoSource, displays: [(id: UInt32, isMain: Bool)],
                                        windowIDs: [UInt32]) -> VideoSource {
         switch saved {
@@ -226,6 +228,16 @@ public enum SourceChoice {
         case .window(let id):
             return windowIDs.contains(id) ? saved : .mainDisplay
         }
+    }
+
+    /// The source to store after the panel reloaded its lists, or nil to leave the setting
+    /// alone. A saved window that is gone becomes `.mainDisplay` while idle (window ids do not
+    /// survive their app closing, and the capture has no fallback for a missing window).
+    /// Displays are left alone (the capture falls back to the main one), as is everything while
+    /// a recording runs or when the window list is unknown (`windowIDs` nil, no screen access).
+    public static func sourceToSave(saved: VideoSource, windowIDs: [UInt32]?, state: RecorderState) -> VideoSource? {
+        guard state == .idle, case .window(let id) = saved, let windowIDs, !windowIDs.contains(id) else { return nil }
+        return .mainDisplay
     }
 
     /// The name of the microphone that will be used; nil when the chosen one is not connected

@@ -188,6 +188,35 @@ final class MenuModelTests: XCTestCase {
         }
     }
 
+    // MARK: Stale saved source
+
+    func testStaleWindowWhileIdleFallsBackToMainDisplay() {
+        XCTAssertEqual(SourceChoice.sourceToSave(saved: .window(id: 9), windowIDs: [3], state: .idle), .mainDisplay)
+    }
+
+    func testStaleWindowWhileRecordingIsLeftAlone() {
+        XCTAssertNil(SourceChoice.sourceToSave(saved: .window(id: 9), windowIDs: [3], state: .recording(since: since)))
+        XCTAssertNil(SourceChoice.sourceToSave(saved: .window(id: 9), windowIDs: [3], state: .starting))
+        XCTAssertNil(SourceChoice.sourceToSave(saved: .window(id: 9), windowIDs: [3], state: .finalizing(reason: .user)))
+    }
+
+    func testExistingWindowIsLeftAlone() {
+        XCTAssertNil(SourceChoice.sourceToSave(saved: .window(id: 3), windowIDs: [3], state: .idle))
+    }
+
+    func testStaleDisplayIsLeftAlone() {
+        XCTAssertNil(SourceChoice.sourceToSave(saved: .display(id: 9), windowIDs: [3], state: .idle))
+    }
+
+    func testMainDisplayIsLeftAlone() {
+        XCTAssertNil(SourceChoice.sourceToSave(saved: .mainDisplay, windowIDs: [3], state: .idle))
+    }
+
+    func testUnknownWindowListLeavesWindowAlone() {
+        // No screen access: the window list could not be loaded, so nothing is known to be gone.
+        XCTAssertNil(SourceChoice.sourceToSave(saved: .window(id: 9), windowIDs: nil, state: .idle))
+    }
+
     // MARK: Hotkey outcome
 
     func testShortcutShownOnlyWhenRegistered() {

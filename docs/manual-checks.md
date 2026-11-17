@@ -3,7 +3,7 @@
 Controlli da fare a mano sull'app installata (`./build.sh --install`). Ogni passo dice
 cosa fare e cosa deve succedere. Se il risultato è diverso, annota cosa è successo.
 
-I passi 19–21 in fondo coprono le correzioni successive (impostazioni bloccate, scorciatoia
+I passi 19–22 in fondo coprono le correzioni successive (impostazioni bloccate, scorciatoia
 occupata, riga del permesso).
 
 ## Primo avvio e permessi
@@ -101,3 +101,7 @@ occupata, riga del permesso).
     **Atteso:** la riga del permesso dice "Dopo averlo concesso, esci e riapri Nastro." e offre
     "Esci da Nastro"; dopo la riapertura di Nastro la riga non c'è più. Se la riga sparisce già
     riaprendo il menu, senza riavviare, annotalo (va bene comunque).
+22. Nel menu scegli come sorgente video una finestra, chiudi il menu, chiudi quella finestra
+    (o esci dalla sua app) e riapri il menu di Nastro; poi avvia una registrazione.
+    **Atteso:** la sorgente video mostra lo schermo principale e la registrazione cattura lo
+    schermo principale (nessun errore "La sorgente scelta non è disponibile.").
