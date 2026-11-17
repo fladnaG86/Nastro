@@ -10,7 +10,7 @@ contains only your voice. Nastro records both sides.
 
 ## Status
 
-Early and private. The code is built and its automated tests pass, but the app has **not yet been
+Early. The code is built and its automated tests pass, but the app has **not yet been
 run through its hands-on checklist** ([docs/manual-checks.md](docs/manual-checks.md)) and has **not
 yet recorded a real long call**. Treat everything below as intended behavior, not as verified
 behavior, except what is stated as measured in [docs/capture-findings.md](docs/capture-findings.md).
@@ -39,6 +39,19 @@ nothing leaves your Mac.
 - macOS 15 or later (microphone capture inside ScreenCaptureKit exists from macOS 15).
 - Developed and tested only on macOS 27.3, Apple Silicon. Other versions are not guaranteed.
 - To build from source: a Swift toolchain (Xcode or Command Line Tools).
+
+## Install from a release
+
+The [Releases](https://github.com/fladnaG86/Nastro/releases) page has `Nastro.app` as a zip, built
+for Apple Silicon. It is **not notarized by Apple**, so macOS blocks it on first launch. After
+unzipping and moving it to `/Applications`, remove the download quarantine once:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Nastro.app
+```
+
+Then open it. If you would rather not run an unnotarized binary, build it yourself as described
+below; the result is the same app.
 
 ## Build
 
@@ -181,7 +194,7 @@ registrata con quelli contiene solo la tua voce. Nastro registra entrambe le par
 
 ## Stato
 
-Iniziale e privato. Il codice è compilato e i test automatici passano, ma l'app **non è ancora stata
+Iniziale. Il codice è compilato e i test automatici passano, ma l'app **non è ancora stata
 provata con la lista di controlli a mano** ([docs/manual-checks.md](docs/manual-checks.md)) e **non
 ha ancora registrato una call vera e lunga**. Quanto segue è il comportamento previsto, non
 verificato, tranne ciò che è indicato come misurato in
@@ -212,6 +225,19 @@ dal tuo Mac.
 - macOS 15 o successivo (la cattura del microfono dentro ScreenCaptureKit esiste da macOS 15).
 - Sviluppata e provata solo su macOS 27.3, Apple Silicon. Le altre versioni non sono garantite.
 - Per compilare dai sorgenti: toolchain Swift (Xcode o Command Line Tools).
+
+## Installazione da una release
+
+La pagina [Releases](https://github.com/fladnaG86/Nastro/releases) contiene `Nastro.app` in uno zip,
+compilata per Apple Silicon. **Non è notarizzata da Apple**, quindi macOS la blocca al primo avvio.
+Dopo averla estratta e spostata in `/Applications`, togli una volta la quarantena del download:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Nastro.app
+```
+
+Poi aprila. Se preferisci non eseguire un binario non notarizzato, compilala da te come descritto
+sotto: il risultato è la stessa app.
 
 ## Compilazione
 
