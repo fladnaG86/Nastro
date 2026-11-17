@@ -223,9 +223,12 @@ swift test                 # test unitari
 **Perché il certificato conta.** `build.sh` firma con il certificato "Nastro Dev" se esiste, altrimenti
 ad-hoc. Con la firma ad-hoc macOS può considerare ogni ricompilazione un'app diversa e chiedere di
 nuovo il permesso di Registrazione schermo. Un certificato autofirmato stabile è il modo previsto per
-evitarlo. `scripts/make-dev-cert.sh` non è ancora stato eseguito, quindi questo è il piano, non una
-cosa dimostrata. Se `codesign` non riesce a usare il certificato, lo script indica di impostarlo come
-attendibile per la firma del codice in Accesso Portachiavi.
+evitarlo. Lo script è stato eseguito una volta sul Mac di sviluppo: il certificato è stato importato e
+`build.sh` ha firmato con quello (verifica con `codesign -dvv dist/Nastro.app`, che deve mostrare
+`Authority=Nastro Dev`; il semplice `-dv` non stampa quella riga). Che il permesso di Registrazione
+schermo sopravviva poi a una ricompilazione non è ancora confermato. Se `codesign` non riesce a usare
+il certificato, lo script indica di impostarlo come attendibile per la firma del codice in Accesso
+Portachiavi.
 
 ## Permessi
 
