@@ -4,7 +4,7 @@ import NastroCore
 import NastroMedia
 
 /// Entry point: `Nastro --probe-record <seconds> <display|window|audio>`,
-/// `Nastro --probe-recover` and `Nastro --preview <idle|recording|problem|settings>` run
+/// `Nastro --probe-recover` and `Nastro --preview <idle|recording|problem|settings|settings-recording>` run
 /// diagnostics instead of the menu bar app.
 @main
 enum NastroMain {
@@ -22,9 +22,18 @@ enum NastroMain {
     }
 }
 
+/// App facts the views show besides the controller's: the hotkey registration and the screen
+/// permission, re-read each time the panel opens.
+@MainActor
+final class AppStatus: ObservableObject {
+    @Published var hotKey: HotKeyOutcome = .notRegistered
+    @Published var screenGranted = Permissions.screenGranted
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let controller = RecordingController(store: SettingsStore(defaults: .standard))
+    let status = AppStatus()
     private var hotKeyLetter: AnyCancellable?
     private static let askedScreenKey = "askedScreenPermission"
 
@@ -45,10 +54,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// ⌃⌥ + the letter; `HotKeyLetters.keyCode` refuses the letters reserved by Postino.
     private func registerHotKey(_ letter: String) {
         HotKeys.unregisterAll()
-        guard let keyCode = HotKeyLetters.keyCode(for: letter) else { return }
-        HotKeys.register(id: 1, keyCode: keyCode, modifiers: HotKeyLetters.modifiers) { [weak self] in
-            self?.controller.toggle()
+        var registered = false
+        if let keyCode = HotKeyLetters.keyCode(for: letter) {
+            registered = HotKeys.register(id: 1, keyCode: keyCode, modifiers: HotKeyLetters.modifiers) { [weak self] in
+                self?.controller.toggle()
+            }
         }
+        status.hotKey = HotKeyLetters.outcome(letter: letter, registered: registered)
     }
 }
 
@@ -57,33 +69,36 @@ struct NastroApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            LiveMenuPanel(controller: appDelegate.controller)
+            LiveMenuPanel(controller: appDelegate.controller, app: appDelegate.status)
         } label: {
-            LiveMenuBarLabel(controller: appDelegate.controller)
+            LiveMenuBarLabel(controller: appDelegate.controller, app: appDelegate.status)
         }
         .menuBarExtraStyle(.window)
 
         Settings {
-            LiveSettings(controller: appDelegate.controller)
+            LiveSettings(controller: appDelegate.controller, app: appDelegate.status)
         }
     }
 }
 
 private struct LiveMenuBarLabel: View {
     @ObservedObject var controller: RecordingController
+    @ObservedObject var app: AppStatus
 
     var body: some View {
         let problem = MenuLayout.displayedProblem(startProblem: controller.startProblem,
-                                                  screenGranted: Permissions.screenGranted)
+                                                  screenGranted: app.screenGranted)
         MenuBarLabelView(label: MenuBarLabel.make(
             state: controller.state, elapsedSeconds: controller.elapsedSeconds,
             attention: MenuBarLabel.needsAttention(warnings: controller.warnings, problem: problem)))
     }
 }
 
-/// Feeds `MenuView` from the controller; reloads the source lists each time the panel opens.
+/// Feeds `MenuView` from the controller; re-reads the screen permission and reloads the source
+/// lists each time the panel opens.
 private struct LiveMenuPanel: View {
     @ObservedObject var controller: RecordingController
+    @ObservedObject var app: AppStatus
     @State private var sources = PanelSources()
     @Environment(\.openSettings) private var openSettings
     @Environment(\.dismiss) private var dismiss
@@ -101,7 +116,8 @@ private struct LiveMenuPanel: View {
                     systemLevelDB: controller.systemLevelDB, microphoneLevelDB: controller.microphoneLevelDB,
                     warnings: controller.warnings,
                     problem: MenuLayout.displayedProblem(startProblem: controller.startProblem,
-                                                         screenGranted: Permissions.screenGranted))
+                                                         screenGranted: app.screenGranted),
+                    hotKey: app.hotKey)
     }
 
     private var actions: PanelActions {
@@ -126,6 +142,7 @@ private struct LiveMenuPanel: View {
     }
 
     private func reload() async {
+        app.screenGranted = Permissions.screenGranted
         // Only while idle: the lists are not shown otherwise.
         guard controller.state == .idle else { return }
         sources = await PanelSources.load()
@@ -134,10 +151,12 @@ private struct LiveMenuPanel: View {
 
 private struct LiveSettings: View {
     @ObservedObject var controller: RecordingController
+    @ObservedObject var app: AppStatus
     @State private var microphones: [MicInfo] = []
 
     var body: some View {
-        SettingsView(settings: $controller.settings, microphones: microphones)
+        SettingsView(settings: $controller.settings, microphones: microphones,
+                     locked: SettingsLock.isLocked(controller.state), hotKey: app.hotKey)
             .onAppear {
                 microphones = SourceCatalog.microphones()
                 NSApp.activate()

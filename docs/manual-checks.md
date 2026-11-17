@@ -3,6 +3,9 @@
 Controlli da fare a mano sull'app installata (`./build.sh --install`). Ogni passo dice
 cosa fare e cosa deve succedere. Se il risultato è diverso, annota cosa è successo.
 
+I passi 19–21 in fondo coprono le correzioni successive (impostazioni bloccate, scorciatoia
+occupata, riga del permesso).
+
 ## Primo avvio e permessi
 
 1. Togli a Nastro i permessi di Registrazione schermo e Microfono (Impostazioni di Sistema →
@@ -80,3 +83,21 @@ cosa fare e cosa deve succedere. Se il risultato è diverso, annota cosa è succ
 18. Registra lo schermo mentre il menu di Nastro e la finestra delle Impostazioni sono aperti,
     poi guarda il file.
     **Atteso:** né il menu di Nastro né la finestra delle Impostazioni compaiono nel video.
+
+## Correzioni successive
+
+19. Durante una registrazione apri le Impostazioni.
+    **Atteso:** in alto la riga "Registrazione in corso: queste impostazioni valgono dalla
+    prossima registrazione."; cartella, risoluzione, fotogrammi, tracce separate e microfono
+    sono disattivati; la scorciatoia resta modificabile.
+20. In un'altra app (per esempio Impostazioni di Sistema → Tastiera → Abbreviazioni da
+    tastiera, o un'app di scorciatoie) assegna ⌃⌥N, poi riavvia Nastro.
+    **Atteso:** accanto ad "Avvia registrazione" non compare ⌃⌥N; nel menu compare la riga "La
+    scorciatoia ⌃⌥N è usata da un'altra app…" e nelle Impostazioni lo stesso avviso sotto la
+    scorciatoia. Scegliendo una lettera libera l'avviso sparisce e la scorciatoia appare accanto
+    al pulsante. (Se macOS accetta comunque ⌃⌥N senza errore, annotalo.)
+21. Senza permesso schermo apri il menu, concedi il permesso in Impostazioni di Sistema e
+    riapri il menu.
+    **Atteso:** la riga del permesso dice "Dopo averlo concesso, esci e riapri Nastro." e offre
+    "Esci da Nastro"; dopo la riapertura di Nastro la riga non c'è più. Se la riga sparisce già
+    riaprendo il menu, senza riavviare, annotalo (va bene comunque).

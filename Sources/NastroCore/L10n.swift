@@ -22,12 +22,15 @@ public enum L10n {
         // Menu
         case startRecording, stopRecording
         case menuWhatToRecord, modeVideoAndAudio, modeAudioOnly
-        case menuVideoSource, menuDisplays, menuWindows, sourceNotAvailable, mainDisplayPlaceholder
+        case menuVideoSource, menuDisplays, menuWindows, mainDisplayPlaceholder
         case menuAudio, systemAudio, microphone, microphoneNotConnected
         case openRecordingsFolder, settingsEllipsis, preparingFile, openSystemSettings
         // Settings window
         case settingsTitle, settingsFolder, chooseFolder, settingsMaxResolution, settingsFramesPerSecond
         case settingsKeepSeparateTracks, settingsMicrophone, systemDefaultMicrophone, settingsHotKey
+        case settingsAppliesNextRecording
+        // Hotkey conflict (%@ = the shortcut) and permission relaunch
+        case hotKeyInUseMenu, hotKeyInUseSettings, relaunchAfterGranting, quitNastro
         // Notifications
         case recordingSaved, recordingEmpty, recordingStopped
         case stoppedSourceLost, stoppedStreamError, stoppedDiskFull
@@ -61,7 +64,6 @@ public enum L10n {
         case .menuVideoSource: return "Sorgente video"
         case .menuDisplays: return "Schermi"
         case .menuWindows: return "Finestre"
-        case .sourceNotAvailable: return "Non più disponibile"
         case .mainDisplayPlaceholder: return "Schermo principale"
         case .menuAudio: return "Audio"
         case .systemAudio: return "Audio di sistema"
@@ -80,6 +82,11 @@ public enum L10n {
         case .settingsMicrophone: return "Microfono"
         case .systemDefaultMicrophone: return "Predefinito di sistema"
         case .settingsHotKey: return "Scorciatoia"
+        case .settingsAppliesNextRecording: return "Registrazione in corso: queste impostazioni valgono dalla prossima registrazione."
+        case .hotKeyInUseMenu: return "La scorciatoia %@ è usata da un'altra app. Puoi cambiarla nelle Impostazioni."
+        case .hotKeyInUseSettings: return "%@ è usata da un'altra app: scegli un'altra lettera."
+        case .relaunchAfterGranting: return "Dopo averlo concesso, esci e riapri Nastro."
+        case .quitNastro: return "Esci da Nastro"
         case .recordingSaved: return "Registrazione salvata"
         case .recordingEmpty: return "Registrazione vuota: nessun file salvato."
         case .recordingStopped: return "Registrazione interrotta"
@@ -119,7 +126,6 @@ public enum L10n {
         case .menuVideoSource: return "Video Source"
         case .menuDisplays: return "Displays"
         case .menuWindows: return "Windows"
-        case .sourceNotAvailable: return "No longer available"
         case .mainDisplayPlaceholder: return "Main Display"
         case .menuAudio: return "Audio"
         case .systemAudio: return "System Audio"
@@ -138,6 +144,11 @@ public enum L10n {
         case .settingsMicrophone: return "Microphone"
         case .systemDefaultMicrophone: return "System default"
         case .settingsHotKey: return "Shortcut"
+        case .settingsAppliesNextRecording: return "Recording in progress: these settings apply from the next recording."
+        case .hotKeyInUseMenu: return "The shortcut %@ is used by another app. You can change it in Settings."
+        case .hotKeyInUseSettings: return "%@ is used by another app: choose another letter."
+        case .relaunchAfterGranting: return "After granting it, quit and reopen Nastro."
+        case .quitNastro: return "Quit Nastro"
         case .recordingSaved: return "Recording saved"
         case .recordingEmpty: return "Empty recording: no file was saved."
         case .recordingStopped: return "Recording stopped"

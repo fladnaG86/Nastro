@@ -2,7 +2,7 @@ import AppKit
 import NastroCore
 import SwiftUI
 
-/// Diagnostic: `Nastro --preview <idle|recording|problem|settings>` shows one view in an
+/// Diagnostic: `Nastro --preview <idle|recording|problem|settings|settings-recording>` shows one view in an
 /// ordinary titled window, with fixed values. No menu bar item, no capture, no permission
 /// request; it stays open until the process is killed.
 @MainActor
@@ -10,7 +10,7 @@ enum PreviewWindow {
     private static var window: NSWindow?
 
     nonisolated static func run(_ arguments: [String]) -> Never {
-        let modes = ["idle", "recording", "problem", "settings"]
+        let modes = ["idle", "recording", "problem", "settings", "settings-recording"]
         guard let mode = arguments.first, modes.contains(mode) else {
             print("usage: Nastro --preview <\(modes.joined(separator: "|"))>")
             exit(1)
@@ -21,8 +21,12 @@ enum PreviewWindow {
             let root: AnyView
             switch mode {
             case "recording": root = AnyView(PreviewPanel(status: recordingStatus, loadSources: false))
-            case "problem": root = AnyView(PreviewPanel(status: idleStatus(problem: .screenPermission), loadSources: true))
-            case "settings": root = AnyView(PreviewSettings())
+            case "problem":
+                var status = idleStatus(problem: .screenPermission)
+                status.hotKey = .inUse("N")
+                root = AnyView(PreviewPanel(status: status, loadSources: true))
+            case "settings": root = AnyView(PreviewSettings(locked: false, hotKey: .registered("N")))
+            case "settings-recording": root = AnyView(PreviewSettings(locked: true, hotKey: .inUse("N")))
             default: root = AnyView(PreviewPanel(status: idleStatus(problem: nil), loadSources: true))
             }
             let host = NSHostingController(rootView: root)
@@ -41,12 +45,14 @@ enum PreviewWindow {
 
     private static func idleStatus(problem: StartProblem?) -> PanelStatus {
         PanelStatus(state: .idle, elapsedSeconds: 0, systemLevelDB: AudioLevel.floorDB,
-                    microphoneLevelDB: AudioLevel.floorDB, warnings: [], problem: problem)
+                    microphoneLevelDB: AudioLevel.floorDB, warnings: [], problem: problem,
+                    hotKey: .registered("N"))
     }
 
     private static let recordingStatus = PanelStatus(
         state: .recording(since: Date()), elapsedSeconds: 12 * 60 + 34, systemLevelDB: -12,
-        microphoneLevelDB: -30, warnings: [.microphoneSilent, .systemAudioNotRecorded], problem: nil)
+        microphoneLevelDB: -30, warnings: [.microphoneSilent, .systemAudioNotRecorded], problem: nil,
+        hotKey: .registered("N"))
 }
 
 private struct PreviewPanel: View {
@@ -73,9 +79,11 @@ private struct PreviewPanel: View {
 }
 
 private struct PreviewSettings: View {
+    let locked: Bool
+    let hotKey: HotKeyOutcome
     @State private var settings = NastroCore.Settings.default
 
     var body: some View {
-        SettingsView(settings: $settings, microphones: SourceCatalog.microphones())
+        SettingsView(settings: $settings, microphones: SourceCatalog.microphones(), locked: locked, hotKey: hotKey)
     }
 }

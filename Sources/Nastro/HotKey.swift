@@ -8,7 +8,9 @@ enum HotKeys {
     private static var refs: [EventHotKeyRef] = []
     private static var installed = false
 
-    static func register(id: UInt32, keyCode: Int, modifiers: Int, action: @escaping () -> Void) {
+    /// False when the system refuses the shortcut (typically held by another app).
+    @discardableResult
+    static func register(id: UInt32, keyCode: Int, modifiers: Int, action: @escaping () -> Void) -> Bool {
         if !installed {
             installed = true
             var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
@@ -21,11 +23,13 @@ enum HotKeys {
                 return noErr
             }, 1, &spec, nil, nil)
         }
-        handlers[id] = action
         var ref: EventHotKeyRef?
         let hkID = EventHotKeyID(signature: OSType(0x4E53_5452), id: id) // 'NSTR'
-        RegisterEventHotKey(UInt32(keyCode), UInt32(modifiers), hkID, GetApplicationEventTarget(), 0, &ref)
-        if let ref { refs.append(ref) }
+        let status = RegisterEventHotKey(UInt32(keyCode), UInt32(modifiers), hkID, GetApplicationEventTarget(), 0, &ref)
+        guard status == noErr, let ref else { return false }
+        refs.append(ref)
+        handlers[id] = action
+        return true
     }
 
     static func unregisterAll() {

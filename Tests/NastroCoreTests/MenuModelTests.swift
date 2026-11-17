@@ -161,12 +161,84 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(SourceChoice.source(forDisplay: 8, isMain: false), .display(id: 8))
     }
 
-    func testAvailability() {
-        XCTAssertTrue(SourceChoice.isAvailable(.mainDisplay, displayIDs: [], windowIDs: []))
-        XCTAssertTrue(SourceChoice.isAvailable(.display(id: 2), displayIDs: [1, 2], windowIDs: []))
-        XCTAssertFalse(SourceChoice.isAvailable(.display(id: 3), displayIDs: [1, 2], windowIDs: [3]))
-        XCTAssertTrue(SourceChoice.isAvailable(.window(id: 3), displayIDs: [], windowIDs: [3]))
-        XCTAssertFalse(SourceChoice.isAvailable(.window(id: 4), displayIDs: [4], windowIDs: [3]))
+    // Displays 1 (main) and 2; window 3.
+    private func selection(_ saved: VideoSource) -> VideoSource {
+        SourceChoice.pickerSelection(saved: saved, displays: [(id: 1, isMain: true), (id: 2, isMain: false)],
+                                     windowIDs: [3])
+    }
+
+    func testPickerSelectionSavedMain() { XCTAssertEqual(selection(.mainDisplay), .mainDisplay) }
+
+    func testPickerSelectionSavedDisplayThatIsNowMain() { XCTAssertEqual(selection(.display(id: 1)), .mainDisplay) }
+
+    func testPickerSelectionSavedSecondaryDisplay() { XCTAssertEqual(selection(.display(id: 2)), .display(id: 2)) }
+
+    func testPickerSelectionSavedDisplayGone() { XCTAssertEqual(selection(.display(id: 9)), .mainDisplay) }
+
+    func testPickerSelectionSavedWindowGone() { XCTAssertEqual(selection(.window(id: 9)), .mainDisplay) }
+
+    func testPickerSelectionSavedWindowExists() { XCTAssertEqual(selection(.window(id: 3)), .window(id: 3)) }
+
+    func testPickerSelectionAlwaysMatchesAnEntry() {
+        // Entries: the main display as `.mainDisplay`, other displays by id, windows by id.
+        let entries: Set<VideoSource> = [.mainDisplay, .display(id: 2), .window(id: 3)]
+        for saved: VideoSource in [.mainDisplay, .display(id: 1), .display(id: 2), .display(id: 9),
+                                   .window(id: 3), .window(id: 9)] {
+            XCTAssertTrue(entries.contains(selection(saved)), "\(saved)")
+        }
+    }
+
+    // MARK: Hotkey outcome
+
+    func testShortcutShownOnlyWhenRegistered() {
+        XCTAssertEqual(HotKeyLetters.shortcutBadge(.registered("N")), "⌃⌥N")
+        XCTAssertNil(HotKeyLetters.shortcutBadge(.inUse("N")))
+        XCTAssertNil(HotKeyLetters.shortcutBadge(.notRegistered))
+    }
+
+    func testConflictShownOnlyWhenInUse() {
+        XCTAssertEqual(HotKeyLetters.conflict(.inUse("M")), "⌃⌥M")
+        XCTAssertNil(HotKeyLetters.conflict(.registered("M")))
+        XCTAssertNil(HotKeyLetters.conflict(.notRegistered))
+    }
+
+    func testOutcomeFromRegistration() {
+        XCTAssertEqual(HotKeyLetters.outcome(letter: "N", registered: true), .registered("N"))
+        XCTAssertEqual(HotKeyLetters.outcome(letter: "N", registered: false), .inUse("N"))
+        XCTAssertEqual(HotKeyLetters.outcome(letter: "S", registered: false), .notRegistered)
+    }
+
+    func testIdleSectionsShowHotKeyConflictAfterProblem() {
+        XCTAssertEqual(MenuLayout.sections(state: .idle, mode: .audioOnly, problem: .folder, hotKeyConflict: true),
+                       [.problem, .hotKeyConflict, .start, .mode, .audio, .openFolder, .settings, .quit])
+        XCTAssertEqual(MenuLayout.sections(state: .recording(since: since), mode: .audioOnly, problem: nil,
+                                           hotKeyConflict: true),
+                       [.hotKeyConflict, .stop, .meters, .openFolder, .settings])
+        XCTAssertEqual(MenuLayout.sections(state: .finalizing(reason: .user), mode: .audioOnly, problem: nil,
+                                           hotKeyConflict: true),
+                       [.hotKeyConflict, .preparing, .openFolder, .settings])
+    }
+
+    // MARK: Settings lock
+
+    func testNextRecordingSettingsLockedUnlessIdle() {
+        XCTAssertFalse(SettingsLock.isLocked(.idle))
+        XCTAssertTrue(SettingsLock.isLocked(.starting))
+        XCTAssertTrue(SettingsLock.isLocked(.recording(since: since)))
+        XCTAssertTrue(SettingsLock.isLocked(.finalizing(reason: .user)))
+    }
+
+    // MARK: Problem row
+
+    func testScreenPermissionRowAsksForRelaunchAndOffersQuit() {
+        XCTAssertEqual(MenuLayout.problemRow(for: .screenPermission),
+                       ProblemRow(pane: .screen, needsRelaunch: true))
+    }
+
+    func testOtherProblemRows() {
+        XCTAssertEqual(MenuLayout.problemRow(for: .microphonePermission), ProblemRow(pane: .microphone, needsRelaunch: false))
+        XCTAssertEqual(MenuLayout.problemRow(for: .folder), ProblemRow(pane: nil, needsRelaunch: false))
+        XCTAssertEqual(MenuLayout.problemRow(for: .other), ProblemRow(pane: nil, needsRelaunch: false))
     }
 
     func testMicrophoneName() {

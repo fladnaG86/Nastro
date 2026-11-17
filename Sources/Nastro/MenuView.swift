@@ -12,6 +12,7 @@ struct PanelStatus {
     var warnings: Set<Warning>
     /// The problem to explain (see `MenuLayout.displayedProblem`).
     var problem: StartProblem?
+    var hotKey: HotKeyOutcome
 }
 
 /// The source lists offered in the panel.
@@ -60,7 +61,8 @@ struct MenuView: View {
     }
 
     private var sections: [MenuSection] {
-        MenuLayout.sections(state: status.state, mode: settings.mode, problem: status.problem)
+        MenuLayout.sections(state: status.state, mode: settings.mode, problem: status.problem,
+                            hotKeyConflict: HotKeyLetters.conflict(status.hotKey) != nil)
     }
 
     private var editable: Bool { MenuLayout.choicesEditable(status.state) }
@@ -69,6 +71,7 @@ struct MenuView: View {
     private func row(_ section: MenuSection) -> some View {
         switch section {
         case .problem: problemRow
+        case .hotKeyConflict: hotKeyConflictRow
         case .start: startRow
         case .mode: modeRow
         case .videoSource: videoSourceRow
@@ -91,19 +94,31 @@ struct MenuView: View {
     @ViewBuilder
     private var problemRow: some View {
         if let problem = status.problem {
-            VStack(alignment: .leading, spacing: 8) {
-                Label {
-                    Text(L10n.t(problem.messageKey)).fixedSize(horizontal: false, vertical: true)
-                } icon: {
-                    Image(systemName: MenuBarLabel.warningSymbol).foregroundStyle(.orange)
-                }
-                if let pane = MenuLayout.permissionPane(for: problem) {
-                    Button(L10n.t(.openSystemSettings)) { actions.openSystemSettings(pane) }
+            let row = MenuLayout.problemRow(for: problem)
+            NoticeBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(L10n.t(problem.messageKey) + (row.needsRelaunch ? " " + L10n.t(.relaunchAfterGranting) : ""))
+                        .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let pane = row.pane {
+                            Button(L10n.t(.openSystemSettings)) { actions.openSystemSettings(pane) }
+                        }
+                        if row.needsRelaunch {
+                            Button(L10n.t(.quitNastro), action: actions.quit)
+                        }
+                    }
                 }
             }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    @ViewBuilder
+    private var hotKeyConflictRow: some View {
+        if let shortcut = HotKeyLetters.conflict(status.hotKey) {
+            NoticeBox {
+                Text(String(format: L10n.t(.hotKeyInUseMenu), shortcut))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -113,7 +128,9 @@ struct MenuView: View {
                 Image(systemName: "record.circle.fill").foregroundStyle(.red)
                 Text(L10n.t(.startRecording))
                 Spacer()
-                Text(HotKeyLetters.display(settings.hotKeyLetter)).foregroundStyle(.secondary)
+                if let shortcut = HotKeyLetters.shortcutBadge(status.hotKey) {
+                    Text(shortcut).foregroundStyle(.secondary)
+                }
             }
             .frame(maxWidth: .infinity)
         }
@@ -138,13 +155,9 @@ struct MenuView: View {
     private var videoSourceRow: some View {
         VStack(alignment: .leading, spacing: 6) {
             SectionHeader(L10n.t(.menuVideoSource))
-            Picker(L10n.t(.menuVideoSource), selection: $settings.videoSource) {
+            Picker(L10n.t(.menuVideoSource), selection: videoSourceSelection) {
                 if !sources.displays.contains(where: \.isMain) {
                     Text(L10n.t(.mainDisplayPlaceholder)).tag(VideoSource.mainDisplay)
-                }
-                if !SourceChoice.isAvailable(settings.videoSource, displayIDs: sources.displays.map(\.id),
-                                             windowIDs: sources.windows.map(\.id)) {
-                    Text(L10n.t(.sourceNotAvailable)).tag(settings.videoSource)
                 }
                 if !sources.displays.isEmpty {
                     Section(L10n.t(.menuDisplays)) {
@@ -166,6 +179,17 @@ struct MenuView: View {
             .labelsHidden()
             .disabled(!editable)
         }
+    }
+
+    /// Always one of the picker's entries; writing stores the user's pick.
+    private var videoSourceSelection: Binding<VideoSource> {
+        Binding(
+            get: {
+                SourceChoice.pickerSelection(saved: settings.videoSource,
+                                             displays: sources.displays.map { ($0.id, $0.isMain) },
+                                             windowIDs: sources.windows.map(\.id))
+            },
+            set: { settings.videoSource = $0 })
     }
 
     private var audioRow: some View {
@@ -198,7 +222,9 @@ struct MenuView: View {
                     Image(systemName: "stop.fill").foregroundStyle(.red)
                     Text(L10n.t(.stopRecording))
                     Spacer(minLength: 0)
-                    Text(HotKeyLetters.display(settings.hotKeyLetter)).foregroundStyle(.secondary)
+                    if let shortcut = HotKeyLetters.shortcutBadge(status.hotKey) {
+                        Text(shortcut).foregroundStyle(.secondary)
+                    }
                 }
                 .frame(maxWidth: .infinity)
             }
@@ -228,6 +254,22 @@ struct MenuView: View {
             ProgressView().controlSize(.small)
             Text(L10n.t(.preparingFile))
         }
+    }
+}
+
+/// An orange box with the warning triangle, for problems the user should act on.
+private struct NoticeBox<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        Label {
+            content
+        } icon: {
+            Image(systemName: MenuBarLabel.warningSymbol).foregroundStyle(.orange)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 

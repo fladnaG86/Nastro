@@ -38,7 +38,7 @@ public struct MenuBarLabel: Equatable, Sendable {
 
 /// A block of rows in the menu panel.
 public enum MenuSection: Equatable, Sendable {
-    case problem, start, mode, videoSource, audio
+    case problem, hotKeyConflict, start, mode, videoSource, audio
     case stop, meters, preparing
     case openFolder, settings, quit
 }
@@ -46,22 +46,45 @@ public enum MenuSection: Equatable, Sendable {
 /// A System Settings privacy pane.
 public enum PermissionPane: Equatable, Sendable { case screen, microphone }
 
+/// How the problem row explains and fixes a start problem.
+public struct ProblemRow: Equatable, Sendable {
+    /// The System Settings pane its button opens; nil = no button.
+    public var pane: PermissionPane?
+    /// macOS reports a newly granted permission only after a relaunch: the row says so and
+    /// offers Quit.
+    public var needsRelaunch: Bool
+
+    public init(pane: PermissionPane?, needsRelaunch: Bool) {
+        self.pane = pane
+        self.needsRelaunch = needsRelaunch
+    }
+}
+
 public enum MenuLayout {
     /// The rows to show, in order. While recording or preparing the file there are no source
     /// choices and no Quit (quitting would cut the file short).
-    public static func sections(state: RecorderState, mode: RecordingMode, problem: StartProblem?) -> [MenuSection] {
+    public static func sections(state: RecorderState, mode: RecordingMode, problem: StartProblem?,
+                                hotKeyConflict: Bool = false) -> [MenuSection] {
+        var rows: [MenuSection] = []
         switch state {
         case .idle, .starting:
-            var rows: [MenuSection] = problem == nil ? [] : [.problem]
+            if problem != nil { rows.append(.problem) }
+            if hotKeyConflict { rows.append(.hotKeyConflict) }
             rows += [.start, .mode]
             if mode == .videoAndAudio { rows.append(.videoSource) }
             rows += [.audio, .openFolder, .settings, .quit]
-            return rows
         case .recording:
-            return [.stop, .meters, .openFolder, .settings]
+            if hotKeyConflict { rows.append(.hotKeyConflict) }
+            rows += [.stop, .meters, .openFolder, .settings]
         case .finalizing:
-            return [.preparing, .openFolder, .settings]
+            if hotKeyConflict { rows.append(.hotKeyConflict) }
+            rows += [.preparing, .openFolder, .settings]
         }
+        return rows
+    }
+
+    public static func problemRow(for problem: StartProblem) -> ProblemRow {
+        ProblemRow(pane: permissionPane(for: problem), needsRelaunch: problem == .screenPermission)
     }
 
     public static func choicesEditable(_ state: RecorderState) -> Bool { state == .idle }
@@ -140,6 +163,37 @@ public enum HotKeyLetters {
     }
 
     public static func display(_ letter: String) -> String { "⌃⌥" + letter.uppercased() }
+
+    /// What registering `letter` led to. A letter that is not allowed is never registered.
+    public static func outcome(letter: String, registered: Bool) -> HotKeyOutcome {
+        guard keyCode(for: letter) != nil else { return .notRegistered }
+        return registered ? .registered(letter.uppercased()) : .inUse(letter.uppercased())
+    }
+
+    /// The shortcut shown next to Start/Stop: only one that actually works.
+    public static func shortcutBadge(_ outcome: HotKeyOutcome) -> String? {
+        if case .registered(let letter) = outcome { return display(letter) }
+        return nil
+    }
+
+    /// The shortcut another app holds, for the "in use" row.
+    public static func conflict(_ outcome: HotKeyOutcome) -> String? {
+        if case .inUse(let letter) = outcome { return display(letter) }
+        return nil
+    }
+}
+
+/// The result of the last hotkey registration.
+public enum HotKeyOutcome: Equatable, Sendable {
+    case registered(String)
+    /// The system refused it, typically because another app holds the shortcut.
+    case inUse(String)
+    case notRegistered
+}
+
+/// Settings that only take effect on the next recording are locked unless idle.
+public enum SettingsLock {
+    public static func isLocked(_ state: RecorderState) -> Bool { state != .idle }
 }
 
 public enum SourceChoice {
@@ -157,11 +211,20 @@ public enum SourceChoice {
         isMain ? .mainDisplay : .display(id: id)
     }
 
-    public static func isAvailable(_ source: VideoSource, displayIDs: [UInt32], windowIDs: [UInt32]) -> Bool {
-        switch source {
-        case .mainDisplay: return true
-        case .display(let id): return displayIDs.contains(id)
-        case .window(let id): return windowIDs.contains(id)
+    /// The picker entry to show for the saved source. Entries are the main display as
+    /// `.mainDisplay`, other displays by id and windows by id. A saved display that is now the
+    /// main one, or a saved display or window that is gone, shows as the main display (the
+    /// capture falls back to it); the saved setting itself is not changed.
+    public static func pickerSelection(saved: VideoSource, displays: [(id: UInt32, isMain: Bool)],
+                                       windowIDs: [UInt32]) -> VideoSource {
+        switch saved {
+        case .mainDisplay:
+            return .mainDisplay
+        case .display(let id):
+            guard let display = displays.first(where: { $0.id == id }), !display.isMain else { return .mainDisplay }
+            return saved
+        case .window(let id):
+            return windowIDs.contains(id) ? saved : .mainDisplay
         }
     }
 
