@@ -48,6 +48,10 @@ public enum Finalizer {
         } catch {
             throw FinalizeError.unreadable
         }
+        // Never overwrite (or, on failure, delete) a file that was already there.
+        guard !FileManager.default.fileExists(atPath: final.path) else {
+            throw FinalizeError.exportFailed
+        }
         let writer: AVAssetWriter
         do {
             writer = try AVAssetWriter(outputURL: final,
