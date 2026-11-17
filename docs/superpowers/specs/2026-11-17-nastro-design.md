@@ -1,6 +1,6 @@
 # Nastro — design
 
-Data: 2026-11-17. Stato: in attesa di approvazione.
+Data: 2026-11-17. Stato: rivisto, in attesa di approvazione di Maurizio.
 
 ## Intento
 
@@ -22,8 +22,10 @@ la registrazione.
   scorciatoia globale, senza aprire finestre.
 - Registrare video dello schermo + audio di sistema + microfono insieme.
 - Registrare solo audio (audio di sistema + microfono) senza video.
-- Produrre un file che si sente per intero in qualsiasi player e quando viene
-  condiviso (una sola traccia audio con entrambe le voci).
+- Produrre un file che si sente per intero in qualsiasi player su Mac e
+  iPhone (una sola traccia audio con entrambe le voci). Le registrazioni le
+  guarda solo Maurizio: la compatibilità con Windows o con l'invio in chat
+  non è richiesta.
 - Reggere call lunghe (2 ore) senza perdere sincronia tra audio e video e
   senza file enormi.
 - Non perdere la registrazione se l'app o il Mac si fermano a metà.
@@ -150,7 +152,8 @@ come Postino.
 - L'audio di sistema è sempre quello dell'intero sistema, anche quando la
   sorgente video è una sola finestra: la call deve sentirsi comunque. L'audio
   prodotto da Nastro stesso è escluso.
-- Video: HEVC, 30 fotogrammi al secondo, lato lungo ridotto a un massimo
+- Video: HEVC (scelto per il peso dei file, dato che le registrazioni restano
+  su dispositivi Apple; nessuna opzione H.264 in v1), 30 fotogrammi al secondo, lato lungo ridotto a un massimo
   equivalente a 1080p mantenendo le proporzioni. Sono valori predefiniti,
   modificabili nelle Impostazioni.
 - Audio: AAC. Audio di sistema e microfono vengono scritti su due tracce
@@ -216,8 +219,7 @@ come Postino.
   - call vera di almeno 30 minuti con le cuffie: entrambe le voci si
     sentono, audio e video sono in sincronia all'inizio e alla fine;
   - stessa prova in solo audio;
-  - il file si apre e si sente per intero in QuickTime, in VLC e dopo l'invio
-    su WhatsApp;
+  - il file si apre e si sente per intero in QuickTime e in VLC;
   - uccidere l'app a metà registrazione: al riavvio il file viene recuperato;
   - chiudere la finestra registrata a metà: il file viene finalizzato;
   - con Postino aperto, le scorciatoie di entrambe le app funzionano.
