@@ -17,9 +17,22 @@ public enum WriteResult: Equatable, Sendable {
 /// audio is queued but only the newest video frame is held (capture frames come from a small
 /// pool); in video mode the session starts at that frame, so a missing source delays the
 /// start by up to 2 s.
+///
+/// While writing, audio is never dropped because its input is momentarily not ready: each
+/// source has a FIFO (bounded to `audioBacklogLimit` of audio; beyond it the oldest buffer
+/// is dropped and counted in `droppedAudioBuffers`) drained in order on that source's later
+/// appends and at `finish()`. `AVAssetWriter` joins audio buffers end to end, so a gap in a
+/// source's timestamps longer than one buffer is filled with silence in that source's format
+/// to keep the voice in sync with the video.
 public final class MovieWriter: @unchecked Sendable {
     /// Presentation-time wait for audio sources to show their format.
     static let formatWait = CMTime(value: 2, timescale: 1)
+    /// Audio kept per source while its input is not ready.
+    static let audioBacklogLimit = CMTime(value: 10, timescale: 1)
+    /// Longest silence appended at once when filling a gap.
+    static let silenceChunk = CMTime(value: 1, timescale: 1)
+    /// How long `finish()` waits for the inputs to accept the queued audio and the tail frame.
+    static let finishWait: TimeInterval = 2
 
     private enum Phase { case collecting, writing, failed, finishing, done }
 
@@ -48,8 +61,15 @@ public final class MovieWriter: @unchecked Sendable {
     private var finishTask: Task<WriteResult, Error>?
     private var sessionStarted = false
     private var degraded: Set<SampleKind> = []
-    /// Last appended presentation time per audio source.
-    private var lastAppendedAudio: [SampleKind: CMTime] = [:]
+    /// Presentation time of the last buffer accepted (queued or appended) per audio source.
+    private var lastAcceptedAudio: [SampleKind: CMTime] = [:]
+    /// Audio accepted but not yet appended, oldest first, per source.
+    private var backlog: [SampleKind: [CMSampleBuffer]] = [:]
+    private var backlogDuration: [SampleKind: CMTime] = [:]
+    /// Where the audio appended so far ends, per source (for gap filling).
+    private var audioEnd: [SampleKind: CMTime] = [:]
+    private var dropped: [SampleKind: Int] = [:]
+    private var _readinessOverride: (@Sendable (SampleKind) -> Bool)?
 
     /// `video == nil` → audio only. Creates the file at `url` (.mov).
     public init(url: URL, video: VideoSpec?, systemAudio: Bool, microphone: Bool) throws {
@@ -101,6 +121,20 @@ public final class MovieWriter: @unchecked Sendable {
         }
     }
 
+    /// Test seam: when set and returning false, the input of that kind counts as not ready
+    /// (it can never make a busy input ready). Called with the writer's lock held.
+    var readinessOverride: (@Sendable (SampleKind) -> Bool)? {
+        get { lock.withLock { _readinessOverride } }
+        set { lock.withLock { _readinessOverride = newValue } }
+    }
+
+    /// Audio buffers really lost per source (only sources with at least one): dropped because
+    /// the source's queue exceeded `audioBacklogLimit`, or still queued when `finish()` gave
+    /// up waiting. Readable from any thread.
+    public var droppedAudioBuffers: [SampleKind: Int] {
+        lock.withLock { dropped }
+    }
+
     /// Audio sources whose format changed after their track was created. Their track ends at
     /// the change and all their later buffers are dropped. Readable from any thread.
     public var degradedSources: Set<SampleKind> {
@@ -108,7 +142,7 @@ public final class MovieWriter: @unchecked Sendable {
     }
 
     /// Callable from any thread; serialised internally. Never blocks waiting for the encoder:
-    /// a sample the input is not ready for is dropped.
+    /// a video frame the input is not ready for is dropped, audio waits in its source's queue.
     public func append(_ kind: SampleKind, _ buffer: CMSampleBuffer) {
         lock.lock()
         defer { lock.unlock() }
@@ -136,16 +170,19 @@ public final class MovieWriter: @unchecked Sendable {
         return try await task.value
     }
 
-    /// The one-time body of `finish()`.
+    /// The one-time body of `finish()`. Runs off the capture threads: the waits for the
+    /// inputs happen here, never in `append`.
     private func closeFile() async throws -> WriteResult {
         enum Step { case close(start: CMTime), discard, fail(Error) }
-        let step: Step = lock.withLock {
+        // 1. Stop accepting samples.
+        let early: Step? = lock.withLock {
             if phase == .collecting, waitStart != nil {
                 startWriting()
             }
             switch phase {
             case .writing:
-                break
+                phase = .finishing
+                return nil
             case .failed:
                 phase = .done
                 return .fail(firstError ?? AVError(.unknown))
@@ -157,8 +194,32 @@ public final class MovieWriter: @unchecked Sendable {
                 // Unreachable: this body runs once. Never touch the file here.
                 return .fail(firstError ?? AVError(.unknown))
             }
-            phase = .finishing
-            extendStaticScreen()
+        }
+
+        if early == nil {
+            // 2. Queued audio, in order, as the inputs accept it.
+            await waitForInputs {
+                expectedAudio.forEach(drain)
+                return backlog.values.allSatisfy(\.isEmpty)
+            }
+            // 3. Static screen: the last frame again at the last audio time.
+            let tail: CMSampleBuffer? = lock.withLock {
+                for (kind, queue) in backlog where !queue.isEmpty {
+                    dropped[kind, default: 0] += queue.count   // the input never took them
+                }
+                backlog = [:]
+                return staticScreenTailFrame()
+            }
+            if let tail {
+                await waitForInputs { isReady(.video) }
+                lock.withLock {
+                    if phase == .finishing { write(.video, tail) }
+                }
+            }
+        }
+
+        // 4. Close.
+        let step: Step = early ?? lock.withLock {
             if phase == .failed {
                 phase = .done
                 return .fail(firstError ?? AVError(.unknown))
@@ -290,19 +351,20 @@ public final class MovieWriter: @unchecked Sendable {
 
     // MARK: - Writing
 
+    /// Video: appended if its input is ready, otherwise dropped. Audio: checked, queued in its
+    /// source's FIFO, and the FIFO drained as far as the input accepts.
     private func write(_ kind: SampleKind, _ buffer: CMSampleBuffer) {
         guard let sessionStart else { return }
         let time = CMSampleBufferGetPresentationTimeStamp(buffer)
         guard time >= sessionStart else { return }
-        let input: AVAssetWriterInput?
         switch kind {
         case .video:
-            input = videoInput
             // Frames must advance; a repeated timestamp would fail the whole writer.
             if lastVideoTime.isValid, time <= lastVideoTime { return }
+            guard let videoInput, isReady(.video) else { return }
+            append(.video, buffer, to: videoInput)
         case .systemAudio, .microphone:
-            input = audioInputs[kind]
-            guard input != nil, !degraded.contains(kind) else { return }
+            guard audioInputs[kind] != nil, !degraded.contains(kind) else { return }
             // A format change (e.g. the mic device switched rate) ends this source's track
             // instead of risking a failed append that would stop the whole recording.
             guard let trackFormat = audioFormats[kind],
@@ -316,39 +378,142 @@ public final class MovieWriter: @unchecked Sendable {
                 return
             }
             // Audio must advance per source; a stray backwards buffer is just dropped.
-            if let last = lastAppendedAudio[kind], time <= last { return }
-        }
-        guard let input, input.isReadyForMoreMediaData else { return }
-
-        guard input.append(buffer) else {
-            record(writer.error ?? AVError(.unknown))
-            return
-        }
-        let duration = CMSampleBufferGetDuration(buffer)
-        let end = duration.isNumeric ? time + duration : time
-        if !endTime.isValid || end > endTime { endTime = end }
-        if kind == .video {
-            lastVideoFrame = buffer
-            lastVideoTime = time
-        } else {
-            lastAppendedAudio[kind] = time
-            if !lastAudioTime.isValid || time > lastAudioTime { lastAudioTime = time }
+            if let last = lastAcceptedAudio[kind], time <= last { return }
+            lastAcceptedAudio[kind] = time
+            enqueue(kind, buffer)
+            drain(kind)
         }
     }
 
-    /// Static screen: if the last frame is older than the last audio sample, writes it again
-    /// at the audio time so the video lasts as long as the audio.
-    private func extendStaticScreen() {
+    private func isReady(_ kind: SampleKind) -> Bool {
+        guard let input = kind == .video ? videoInput : audioInputs[kind] else { return false }
+        return (_readinessOverride?(kind) ?? true) && input.isReadyForMoreMediaData
+    }
+
+    /// Adds `buffer` to its source's FIFO; beyond `audioBacklogLimit` the oldest buffers are
+    /// dropped and counted.
+    private func enqueue(_ kind: SampleKind, _ buffer: CMSampleBuffer) {
+        backlog[kind, default: []].append(buffer)
+        var total = (backlogDuration[kind] ?? .zero) + Self.duration(of: buffer)
+        while total > Self.audioBacklogLimit, let queue = backlog[kind], queue.count > 1 {
+            total = total - Self.duration(of: queue[0])
+            backlog[kind]?.removeFirst()
+            dropped[kind, default: 0] += 1
+        }
+        backlogDuration[kind] = total
+    }
+
+    /// Appends the source's queued audio in order while its input is ready. Before a buffer
+    /// that starts more than one buffer's duration after the audio written so far ends, the
+    /// gap is filled with silence (in chunks of at most `silenceChunk`): `AVAssetWriter` would
+    /// otherwise join the two and move the rest of that voice earlier.
+    private func drain(_ kind: SampleKind) {
+        guard let input = audioInputs[kind] else { return }
+        while phase == .writing || phase == .finishing, let head = backlog[kind]?.first, isReady(kind) {
+            let start = CMSampleBufferGetPresentationTimeStamp(head)
+            let duration = Self.duration(of: head)
+            if let end = audioEnd[kind], start - end > duration,
+               let silence = makeSilence(kind, at: end, duration: min(start - end, Self.silenceChunk)) {
+                guard append(kind, silence, to: input) else { return }
+                continue
+            }
+            backlog[kind]?.removeFirst()
+            backlogDuration[kind] = (backlogDuration[kind] ?? .zero) - duration
+            guard append(kind, head, to: input) else { return }
+        }
+    }
+
+    /// Appends to the input (already checked ready). False (and the writer failed) if rejected.
+    @discardableResult
+    private func append(_ kind: SampleKind, _ buffer: CMSampleBuffer, to input: AVAssetWriterInput) -> Bool {
+        guard input.append(buffer) else {
+            record(writer.error ?? AVError(.unknown))
+            return false
+        }
+        let time = CMSampleBufferGetPresentationTimeStamp(buffer)
+        if kind == .video {
+            let duration = CMSampleBufferGetDuration(buffer)
+            let end = duration.isNumeric ? time + duration : time
+            if !endTime.isValid || end > endTime { endTime = end }
+            lastVideoFrame = buffer
+            lastVideoTime = time
+        } else {
+            let end = time + Self.duration(of: buffer)
+            if !endTime.isValid || end > endTime { endTime = end }
+            audioEnd[kind] = end
+            if !lastAudioTime.isValid || time > lastAudioTime { lastAudioTime = time }
+        }
+        return true
+    }
+
+    /// An audio buffer's duration, from its sample count when it carries none.
+    private static func duration(of buffer: CMSampleBuffer) -> CMTime {
+        let duration = CMSampleBufferGetDuration(buffer)
+        if duration.isNumeric { return duration }
+        guard let format = CMSampleBufferGetFormatDescription(buffer),
+              let rate = CMAudioFormatDescriptionGetStreamBasicDescription(format)?.pointee.mSampleRate,
+              rate > 0
+        else { return .zero }
+        return CMTime(value: CMTimeValue(CMSampleBufferGetNumSamples(buffer)), timescale: CMTimeScale(rate))
+    }
+
+    /// Silence in the source's own (linear PCM, float or signed integer) format, starting at
+    /// `time`; nil for any other format.
+    private func makeSilence(_ kind: SampleKind, at time: CMTime, duration: CMTime) -> CMSampleBuffer? {
+        guard let format = audioFormats[kind],
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format)?.pointee,
+              asbd.mFormatID == kAudioFormatLinearPCM,
+              asbd.mFormatFlags & (kAudioFormatFlagIsFloat | kAudioFormatFlagIsSignedInteger) != 0,
+              asbd.mBytesPerFrame > 0, asbd.mSampleRate > 0
+        else { return nil }
+        let frames = Int((duration.seconds * asbd.mSampleRate).rounded())
+        guard frames > 0 else { return nil }
+        // Non-interleaved data is one plane per channel, one after the other.
+        let planes = asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0 ? Int(asbd.mChannelsPerFrame) : 1
+        let bytes = frames * Int(asbd.mBytesPerFrame) * planes
+        var block: CMBlockBuffer?
+        guard CMBlockBufferCreateWithMemoryBlock(
+                allocator: kCFAllocatorDefault, memoryBlock: nil, blockLength: bytes,
+                blockAllocator: kCFAllocatorDefault, customBlockSource: nil, offsetToData: 0,
+                dataLength: bytes, flags: kCMBlockBufferAssureMemoryNowFlag,
+                blockBufferOut: &block) == kCMBlockBufferNoErr,
+              let block,
+              CMBlockBufferFillDataBytes(with: 0, blockBuffer: block, offsetIntoDestination: 0,
+                                         dataLength: bytes) == kCMBlockBufferNoErr
+        else { return nil }
+        var sample: CMSampleBuffer?
+        guard CMAudioSampleBufferCreateReadyWithPacketDescriptions(
+                allocator: kCFAllocatorDefault, dataBuffer: block, formatDescription: format,
+                sampleCount: frames, presentationTimeStamp: time, packetDescriptions: nil,
+                sampleBufferOut: &sample) == noErr
+        else { return nil }
+        return sample
+    }
+
+    /// Static screen: if the last frame is older than the last audio sample, a copy of it at
+    /// the audio time, so the video lasts as long as the audio; nil otherwise.
+    private func staticScreenTailFrame() -> CMSampleBuffer? {
         guard let frame = lastVideoFrame, lastAudioTime.isValid, lastAudioTime > lastVideoTime
-        else { return }
+        else { return nil }
         var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: lastAudioTime,
                                         decodeTimeStamp: .invalid)
         var copy: CMSampleBuffer?
         let status = CMSampleBufferCreateCopyWithNewTiming(
             allocator: kCFAllocatorDefault, sampleBuffer: frame, sampleTimingEntryCount: 1,
             sampleTimingArray: &timing, sampleBufferOut: &copy)
-        guard status == noErr, let copy else { return }
-        write(.video, copy)
+        guard status == noErr, let copy else { return nil }
+        return copy
+    }
+
+    /// Calls `condition` under the lock until it holds, writing stops (failure), or
+    /// `finishWait` has passed, sleeping briefly between attempts. Only used by `finish()`.
+    private func waitForInputs(_ condition: () -> Bool) async {
+        let deadline = Date().addingTimeInterval(Self.finishWait)
+        while true {
+            let done = lock.withLock { phase != .finishing || condition() }
+            if done || Date() >= deadline { return }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
     }
 
     /// AAC target (128 kb/s for two channels, 64 kb/s for one) capped at the encoder's maximum
@@ -388,6 +553,8 @@ public final class MovieWriter: @unchecked Sendable {
         if firstError == nil { firstError = error }
         pending = []
         heldFrame = nil
+        backlog = [:]
+        backlogDuration = [:]
         phase = .failed
     }
 }

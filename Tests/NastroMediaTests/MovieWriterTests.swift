@@ -3,6 +3,23 @@ import CoreMedia
 import XCTest
 @testable import NastroMedia
 
+/// A boolean shared with a readiness override (called on the writer's threads).
+private final class Flag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored = false
+    var value: Bool {
+        get { lock.withLock { stored } }
+        set { lock.withLock { stored = newValue } }
+    }
+}
+
+/// Counts calls: `next()` returns 1, 2, 3…
+private final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    func next() -> Int { lock.withLock { count += 1; return count } }
+}
+
 final class MovieWriterTests: XCTestCase {
     private var directory: URL!
 
@@ -84,6 +101,7 @@ final class MovieWriterTests: XCTestCase {
         XCTAssertNil(writer.failure)
         XCTAssertEqual(writer.sourcesWithoutTrack, [])
         XCTAssertEqual(writer.degradedSources, [])
+        XCTAssertEqual(writer.droppedAudioBuffers, [:])
 
         let tracks = try await TestMedia.tracks(of: workURL)
         XCTAssertEqual(tracks.video, 1)
@@ -292,6 +310,120 @@ final class MovieWriterTests: XCTestCase {
         XCTAssertEqual(videoTracks.count, 1)
         let range = try await videoTracks[0].load(.timeRange)
         XCTAssertEqual(range.duration.seconds, 3, accuracy: 0.3)
+    }
+
+    /// Feeds video 0…`until` s and system audio (48 kHz stereo, 1024-frame blocks) with the
+    /// tone audible from `toneFrom` s, skipping the blocks whose offset is in `withheld`.
+    /// Returns the offset of the first audible block.
+    @discardableResult
+    private func feedToneAfterGap(_ writer: MovieWriter, until: Double, toneFrom: Double,
+                                  withheld: Range<Double>) -> Double {
+        let origin = 1000.0
+        var events: [(time: CMTime, kind: SampleKind, buffer: () -> CMSampleBuffer)] = []
+        for offset in frames(from: 0, until: until) {
+            let time = CMTime(seconds: origin + offset, preferredTimescale: 30_000)
+            events.append((time, .video, { [spec] in
+                TestMedia.videoFrame(width: spec.width, height: spec.height, at: time)
+            }))
+        }
+        var firstAudible = Double.infinity
+        var frame = Int64(origin * 48_000)
+        while frame < Int64((origin + until) * 48_000) {
+            let time = CMTime(value: frame, timescale: 48_000)
+            let offset = Double(frame) / 48_000 - origin
+            frame += 1024
+            if withheld.contains(offset) { continue }
+            let audible = offset >= toneFrom
+            if audible { firstAudible = min(firstAudible, offset) }
+            events.append((time, .systemAudio, {
+                TestMedia.tone(sampleRate: 48_000, channels: 2, at: time,
+                               duration: CMTime(value: 1024, timescale: 48_000),
+                               amplitude: audible ? 0.5 : 0)
+            }))
+        }
+        events.sort { CMTimeCompare($0.time, $1.time) < 0 }
+        for event in events { writer.append(event.kind, event.buffer()) }
+        return firstAudible
+    }
+
+    func testMissingAudioBufferKeepsLaterAudioInPlace() async throws {
+        // F3: 0.5 s of system audio never arrives (0.75…1.25 s); the tone that starts at
+        // ≈1.5 s must still start there in the file (±50 ms), not 0.5 s earlier.
+        let writer = try MovieWriter(url: workURL, video: spec, systemAudio: true, microphone: false)
+        let toneStart = feedToneAfterGap(writer, until: 3, toneFrom: 1.5, withheld: 0.75..<1.25)
+        _ = try writtenDuration(try await writer.finish())
+        XCTAssertNil(writer.failure)
+
+        let onset = try await TestMedia.firstLoudTime(of: workURL)
+        XCTAssertEqual(try XCTUnwrap(onset), toneStart, accuracy: 0.05)
+    }
+
+    func testAudioTheInputIsNotReadyForIsQueuedAndWrittenInOrder() async throws {
+        // F3: system audio input "not ready" for 1…2 s → nothing dropped, the tone is still
+        // there in 1.2…1.8 s and the audio track lasts ≈ 3 s.
+        let writer = try MovieWriter(url: workURL, video: spec, systemAudio: true, microphone: false)
+        let blocked = Flag()
+        writer.readinessOverride = { kind in !(kind == .systemAudio && blocked.value) }
+        let system = { (from: Double, until: Double) in
+            AudioSource(kind: .systemAudio, sampleRate: 48_000, channels: 2, from: from, until: until)
+        }
+        feed(writer, origin: 1000, videoTimes: frames(from: 0, until: 1), audio: [system(0, 1)])
+        blocked.value = true
+        feed(writer, origin: 1000, videoTimes: frames(from: 1, until: 2), audio: [system(1, 2)])
+        blocked.value = false
+        feed(writer, origin: 1000, videoTimes: frames(from: 2, until: 3), audio: [system(2, 3)])
+        _ = try writtenDuration(try await writer.finish())
+        XCTAssertNil(writer.failure)
+        XCTAssertEqual(writer.droppedAudioBuffers, [:])
+
+        let middle = try await TestMedia.peakLevel(of: workURL, from: 1.2, to: 1.8)
+        XCTAssertGreaterThan(middle, -20)
+        let audio = try await AVURLAsset(url: workURL).loadTracks(withMediaType: .audio)
+        let range = try await audio[0].load(.timeRange)
+        XCTAssertEqual(range.duration.seconds, 3, accuracy: 0.1)
+    }
+
+    func testAudioBacklogBeyondTheLimitDropsTheOldestAndCountsThem() async throws {
+        // F3: 12 s of system audio while its input is not ready → the oldest ≈ 2 s beyond the
+        // 10 s bound are dropped and counted; their time is kept as silence (file ≈ 14 s).
+        let writer = try MovieWriter(url: workURL, video: nil, systemAudio: true, microphone: false)
+        let blocked = Flag()
+        writer.readinessOverride = { kind in !(kind == .systemAudio && blocked.value) }
+        let system = { (from: Double, until: Double) in
+            AudioSource(kind: .systemAudio, sampleRate: 48_000, channels: 2, from: from, until: until)
+        }
+        feed(writer, origin: 1000, videoTimes: [], audio: [system(0, 1)])
+        blocked.value = true
+        feed(writer, origin: 1000, videoTimes: [], audio: [system(1, 13)])
+        blocked.value = false
+        feed(writer, origin: 1000, videoTimes: [], audio: [system(13, 14)])
+        let duration = try writtenDuration(try await writer.finish())
+        XCTAssertNil(writer.failure)
+
+        let dropped = try XCTUnwrap(writer.droppedAudioBuffers[.systemAudio])
+        XCTAssertTrue((90...96).contains(dropped), "dropped \(dropped)")   // 2 s / 1024 frames ≈ 94
+        XCTAssertEqual(writer.droppedAudioBuffers.count, 1)
+        XCTAssertEqual(duration, 14, accuracy: 0.1)
+        let tracks = try await TestMedia.tracks(of: workURL)
+        XCTAssertEqual(tracks.duration, 14, accuracy: 0.1)
+    }
+
+    func testStaticScreenTailFrameWaitsForTheVideoInput() async throws {
+        // F3: at finish the video input is not ready for the first queries; the static-screen
+        // tail frame is still written (video track ≥ 4.8 s).
+        let writer = try MovieWriter(url: workURL, video: spec, systemAudio: true, microphone: false)
+        feed(writer, origin: 0, videoTimes: [0], audio: [
+            AudioSource(kind: .systemAudio, sampleRate: 48_000, channels: 2, until: 5),
+        ])
+        let videoQueries = Counter()
+        writer.readinessOverride = { kind in kind != .video || videoQueries.next() > 5 }
+        _ = try writtenDuration(try await writer.finish())
+        XCTAssertNil(writer.failure)
+
+        let videoTracks = try await AVURLAsset(url: workURL).loadTracks(withMediaType: .video)
+        XCTAssertEqual(videoTracks.count, 1)
+        let range = try await videoTracks[0].load(.timeRange)
+        XCTAssertGreaterThanOrEqual(range.duration.seconds, 4.8)
     }
 
     func testAudioBeforeFirstFrameIsDropped() async throws {

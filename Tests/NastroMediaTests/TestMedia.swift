@@ -197,6 +197,69 @@ enum TestMedia {
         return peak > 0 ? 20 * log10(Double(peak)) : -.infinity
     }
 
+    /// Decodes the first audio track to interleaved float PCM and calls `visit` with each
+    /// buffer's start time (seconds, file timeline), sample rate, channel count and samples.
+    private static func readFirstAudioTrack(
+        of url: URL, _ visit: (_ start: Double, _ rate: Double, _ channels: Int, _ samples: [Float]) -> Bool
+    ) async throws {
+        let asset = AVURLAsset(url: url)
+        guard let track = try await asset.loadTracks(withMediaType: .audio).first
+        else { throw Failure("no audio track") }
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVLinearPCMBitDepthKey: 32,
+            AVLinearPCMIsFloatKey: true,
+            AVLinearPCMIsNonInterleaved: false,
+            AVLinearPCMIsBigEndianKey: false,
+        ])
+        reader.add(output)
+        guard reader.startReading() else { throw reader.error ?? Failure("cannot read audio") }
+        defer { reader.cancelReading() }
+        while let buffer = output.copyNextSampleBuffer() {
+            guard let block = CMSampleBufferGetDataBuffer(buffer),
+                  let format = CMSampleBufferGetFormatDescription(buffer),
+                  let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format)?.pointee
+            else { continue }
+            let length = CMBlockBufferGetDataLength(block)
+            var data = [Float](repeating: 0, count: length / MemoryLayout<Float>.size)
+            let status = data.withUnsafeMutableBytes {
+                CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: length,
+                                           destination: $0.baseAddress!)
+            }
+            guard status == noErr else { throw Failure("cannot copy audio: \(status)") }
+            let start = CMSampleBufferGetPresentationTimeStamp(buffer).seconds
+            if !visit(start, asbd.mSampleRate, Int(asbd.mChannelsPerFrame), data) { return }
+        }
+    }
+
+    /// Time (seconds, file timeline) of the first sample of the first audio track whose
+    /// absolute value exceeds `threshold`; nil if none does.
+    static func firstLoudTime(of url: URL, threshold: Float = 0.05) async throws -> Double? {
+        var found: Double?
+        try await readFirstAudioTrack(of: url) { start, rate, channels, samples in
+            guard let index = samples.firstIndex(where: { abs($0) > threshold }) else { return true }
+            found = start + Double(index / channels) / rate
+            return false
+        }
+        return found
+    }
+
+    /// Peak level (dBFS) of each channel of the first audio track over `from…to` seconds.
+    static func channelPeaks(of url: URL, from: Double, to: Double) async throws -> [Double] {
+        var peaks: [Float] = []
+        try await readFirstAudioTrack(of: url) { start, rate, channels, samples in
+            if peaks.isEmpty { peaks = Array(repeating: 0, count: channels) }
+            for (index, value) in samples.enumerated() {
+                let time = start + Double(index / channels) / rate
+                guard time >= from, time < to else { continue }
+                peaks[index % channels] = max(peaks[index % channels], abs(value))
+            }
+            return true
+        }
+        return peaks.map { $0 > 0 ? 20 * log10(Double($0)) : -.infinity }
+    }
+
     /// Sample rate and channel count of each audio track, in file order.
     static func audioFormats(of url: URL) async throws -> [(sampleRate: Double, channels: Int)] {
         let asset = AVURLAsset(url: url)
