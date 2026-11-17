@@ -107,16 +107,21 @@ final class CaptureSession: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     }
 
     /// Starts the streams in plan order (the audio-carrying one first). If one fails to
-    /// start, the ones already running are stopped and the error is thrown.
+    /// start, every stream created so far is stopped and the error is thrown. If the session
+    /// is stopped while starting (by `stop()` or by a stream stopping itself), every stream
+    /// created so far is stopped and `CancellationError` is thrown: the session is not running.
     func start() async throws {
         guard Permissions.screenGranted else { throw CaptureError.noPermission }
         if wantsMicrophone, [.denied, .restricted].contains(Permissions.microphoneStatus) {
             throw CaptureError.noPermission
         }
-        var started: [SCStream] = []
+        // Every stream this call creates, so a failed or cancelled start can stop them all even
+        // if a concurrent `stop()` already took them from `streams`.
+        var created: [SCStream] = []
         do {
             for (index, item) in prepared.enumerated() {
                 let stream = SCStream(filter: item.filter, configuration: item.configuration, delegate: self)
+                created.append(stream)
                 let queue = DispatchQueue(label: "it.nastro.capture.\(index)", qos: .userInteractive)
                 if item.plan.video == .full {
                     try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
@@ -127,13 +132,21 @@ final class CaptureSession: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
                 if item.plan.microphone {
                     try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: queue)
                 }
-                lock.withLock { streams.append(stream) }
+                let registered: Bool = lock.withLock {
+                    guard !finished else { return false }
+                    streams.append(stream)
+                    return true
+                }
+                guard registered else { throw CancellationError() }
                 try await stream.startCapture()
-                started.append(stream)
+                if lock.withLock({ finished }) { throw CancellationError() }
             }
         } catch {
-            lock.withLock { finished = true }
-            for stream in started { try? await stream.stopCapture() }
+            lock.withLock {
+                finished = true
+                streams = []
+            }
+            await tearDown(created)
             if let scError = error as? SCStreamError, scError.code == .userDeclined {
                 throw CaptureError.noPermission
             }
@@ -145,9 +158,21 @@ final class CaptureSession: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     func stop() async {
         let toStop: [SCStream] = lock.withLock {
             finished = true
+            defer { streams = [] }
             return streams
         }
-        for stream in toStop { try? await stream.stopCapture() }
+        await tearDown(toStop)
+    }
+
+    /// Stops the streams and detaches the session from them (harmless on a stream that is
+    /// already stopped or never started).
+    private func tearDown(_ toStop: [SCStream]) async {
+        for stream in toStop {
+            try? await stream.stopCapture()
+            for type in [SCStreamOutputType.screen, .audio, .microphone] {
+                try? stream.removeStreamOutput(self, type: type)
+            }
+        }
     }
 
     // MARK: SCStreamOutput
@@ -169,14 +194,16 @@ final class CaptureSession: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     // MARK: SCStreamDelegate
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        let others: [SCStream]? = lock.withLock {
+        let all: [SCStream]? = lock.withLock {
             guard !finished else { return nil }
             finished = true
-            return streams.filter { $0 !== stream }
+            defer { streams = [] }
+            return streams
         }
-        guard let others else { return }
+        guard let all else { return }
         sink.captureStopped(error: error)
-        Task { for other in others { try? await other.stopCapture() } }
+        // Includes the stream that stopped: stopping it again is harmless and detaches the session.
+        Task { await self.tearDown(all) }
     }
 
     private static func isComplete(_ buffer: CMSampleBuffer) -> Bool {
