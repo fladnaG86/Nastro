@@ -2,6 +2,14 @@ import AVFoundation
 import XCTest
 @testable import NastroMedia
 
+/// What a background `finalize` call ended with, readable even if it never ends.
+private final class Outcome: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Any?
+    var value: Any? { lock.withLock { stored } }
+    func set(_ value: Any) { lock.withLock { stored = value } }
+}
+
 final class FinalizerTests: XCTestCase {
     private var directory: URL!
 
@@ -86,6 +94,52 @@ final class FinalizerTests: XCTestCase {
         XCTAssertEqual(tracks.duration, 3, accuracy: 0.2)
         let hasVideo = await Finalizer.hasVideo(final)
         XCTAssertFalse(hasVideo)
+    }
+
+    func testExistingFinalIsNotTouched() async throws {
+        // final.mp4 esiste già con byte noti → throws FinalizeError.exportFailed ;
+        // final.mp4 ha ancora gli stessi byte ; il file di lavoro esiste ancora
+        try await makeWorkWithBothSources()
+        let final = directory.appendingPathComponent("final.mp4")
+        let original = Data("user file, do not touch".utf8)
+        try original.write(to: final)
+
+        do {
+            try await Finalizer.finalize(workFile: workURL, to: final, keepSeparateTracks: false)
+            XCTFail("expected FinalizeError.exportFailed")
+        } catch let error as FinalizeError {
+            XCTAssertEqual(error, .exportFailed)
+        }
+        XCTAssertEqual(try? Data(contentsOf: final), original)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: workURL.path))
+    }
+
+    func testFailedAppendMidwayThrowsWithoutHanging() async throws {
+        // video + sistema 48k/2ch + mic 16k/1ch, tracce separate ; l'append video fallisce
+        // dopo 30 campioni → throws FinalizeError.exportFailed entro 10 s ; nessun file
+        // finale ; il file di lavoro esiste ancora
+        try await makeWorkWithBothSources()
+        let final = directory.appendingPathComponent("final.mp4")
+        let work = workURL
+        let finished = expectation(description: "finalize returned")
+        let outcome = Outcome()
+        // Not awaited: if finalize hangs, the timeout fails the test instead of blocking.
+        Task {
+            do {
+                try await Finalizer.finalize(
+                    workFile: work, to: final, keepSeparateTracks: true,
+                    failAppend: { mediaType, appended in mediaType == .video && appended >= 30 })
+                outcome.set("returned without error")
+            } catch {
+                outcome.set(error)
+            }
+            finished.fulfill()
+        }
+
+        await fulfillment(of: [finished], timeout: 10)
+        XCTAssertEqual(outcome.value as? FinalizeError, .exportFailed)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: final.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: workURL.path))
     }
 
     func testUnreadableWorkFileThrowsAndLeavesNoOutput() async throws {

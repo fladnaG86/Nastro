@@ -31,6 +31,17 @@ public enum Finalizer {
     /// Never deletes `workFile`: the caller does that after success. On failure, whatever
     /// was written at `final` is deleted.
     public static func finalize(workFile: URL, to final: URL, keepSeparateTracks: Bool) async throws {
+        try await finalize(workFile: workFile, to: final, keepSeparateTracks: keepSeparateTracks,
+                           failAppend: nil)
+    }
+
+    /// Test seam: consulted before each append with the input's media type and the number
+    /// of samples already appended to it; `true` makes that append fail as if the writer
+    /// had rejected it.
+    typealias AppendFailure = @Sendable (_ mediaType: AVMediaType, _ appended: Int) -> Bool
+
+    static func finalize(workFile: URL, to final: URL, keepSeparateTracks: Bool,
+                         failAppend: AppendFailure?) async throws {
         let asset = AVURLAsset(url: workFile)
         let tracks: [AVAssetTrack]
         do {
@@ -64,7 +75,7 @@ public enum Finalizer {
             let pairs = try await makePairs(reader: reader, writer: writer, video: videoTracks,
                                             audio: audioTracks,
                                             mix: audioTracks.count > 1 && !keepSeparateTracks)
-            try await copy(pairs, reader: reader, writer: writer)
+            try await copy(pairs, reader: reader, writer: writer, failAppend: failAppend)
         } catch {
             if writer.status == .writing { writer.cancelWriting() }
             reader.cancelReading()
@@ -125,13 +136,13 @@ public enum Finalizer {
 
     /// Pumps every output into its input (each on its own queue, so the writer can interleave)
     /// and closes the file.
-    private static func copy(_ pairs: [Pair], reader: AVAssetReader,
-                             writer: AVAssetWriter) async throws {
+    private static func copy(_ pairs: [Pair], reader: AVAssetReader, writer: AVAssetWriter,
+                             failAppend: AppendFailure?) async throws {
         guard reader.startReading() else { throw FinalizeError.unreadable }
         guard writer.startWriting() else { throw FinalizeError.exportFailed }
         writer.startSession(atSourceTime: .zero)
 
-        let session = CopySession(pairs: pairs, writer: writer)
+        let session = CopySession(pairs: pairs, writer: writer, failAppend: failAppend)
         await session.run()
 
         if reader.status == .failed { throw FinalizeError.exportFailed }
@@ -142,50 +153,102 @@ public enum Finalizer {
         guard writer.status == .completed else { throw FinalizeError.exportFailed }
     }
 
-    /// AVFoundation objects are not Sendable; each pair is touched only from its own serial
-    /// queue, and `appendFailed` is guarded by `lock`.
+    /// Runs one pump per pair, each on its own serial queue (AVFoundation objects are not
+    /// Sendable; a pair is only touched from its queue). Shared state is guarded by `lock`.
+    ///
+    /// `run()` always returns: a pump ends when its output is exhausted, and the first failure
+    /// (a rejected append, or the writer leaving `.writing`, which a watchdog also polls for
+    /// in case every input is waiting and no block runs again) ends every pump at once from
+    /// the failure site. Each pump leaves the group exactly once, whichever happens first.
     private final class CopySession: @unchecked Sendable {
+        private static let watchdogInterval = DispatchTimeInterval.milliseconds(250)
+
         private let pairs: [Pair]
         private let writer: AVAssetWriter
+        private let failAppend: AppendFailure?
+        private let group = DispatchGroup()
+        private let queues: [DispatchQueue]
         private let lock = NSLock()
         private var failed = false
+        private var ended: [Bool]
+        private var appended: [Int]
 
-        init(pairs: [Pair], writer: AVAssetWriter) {
+        init(pairs: [Pair], writer: AVAssetWriter, failAppend: AppendFailure?) {
             self.pairs = pairs
             self.writer = writer
+            self.failAppend = failAppend
+            queues = pairs.indices.map { DispatchQueue(label: "Nastro.Finalizer.\($0)") }
+            ended = Array(repeating: false, count: pairs.count)
+            appended = Array(repeating: 0, count: pairs.count)
         }
 
         var appendFailed: Bool { lock.withLock { failed } }
 
         func run() async {
+            let watchdog = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+            watchdog.schedule(deadline: .now() + Self.watchdogInterval,
+                              repeating: Self.watchdogInterval)
+            watchdog.setEventHandler { [self] in
+                if writer.status != .writing { fail() }
+            }
+
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                let group = DispatchGroup()
-                for (index, pair) in pairs.enumerated() {
+                for index in pairs.indices {
                     group.enter()
-                    let queue = DispatchQueue(label: "Nastro.Finalizer.\(index)")
-                    pair.input.requestMediaDataWhenReady(on: queue) { [self] in
-                        while pair.input.isReadyForMoreMediaData {
-                            var done = appendFailed || writer.status != .writing
-                            if !done {
-                                if let buffer = pair.output.copyNextSampleBuffer() {
-                                    if !pair.input.append(buffer) {
-                                        lock.withLock { failed = true }
-                                        done = true
-                                    }
-                                } else {
-                                    done = true
-                                }
-                            }
-                            if done {
-                                pair.input.markAsFinished()
-                                group.leave()
-                                return
-                            }
-                        }
+                    pairs[index].input.requestMediaDataWhenReady(on: queues[index]) { [self] in
+                        pump(index)
                     }
                 }
-                group.notify(queue: .global()) { continuation.resume() }
+                watchdog.resume()
+                group.notify(queue: .global()) { [self] in
+                    watchdog.cancel()
+                    // Let any block still in the middle of an append return before the caller
+                    // finishes or cancels the writer.
+                    queues.forEach { $0.sync {} }
+                    continuation.resume()
+                }
             }
+        }
+
+        /// Body of the media-data block of pair `index` (runs on `queues[index]`).
+        private func pump(_ index: Int) {
+            let pair = pairs[index]
+            while lock.withLock({ !ended[index] }) {
+                guard writer.status == .writing else { return fail() }
+                guard pair.input.isReadyForMoreMediaData else { return }
+                guard let buffer = pair.output.copyNextSampleBuffer() else {
+                    pair.input.markAsFinished()
+                    return end([index])
+                }
+                guard append(buffer, to: index) else { return fail() }
+            }
+        }
+
+        /// Appends through the test seam; counts successful appends per input.
+        private func append(_ buffer: CMSampleBuffer, to index: Int) -> Bool {
+            let input = pairs[index].input
+            let count = lock.withLock { appended[index] }
+            if failAppend?(input.mediaType, count) == true { return false }
+            guard input.append(buffer) else { return false }
+            lock.withLock { appended[index] += 1 }
+            return true
+        }
+
+        /// Records the failure and ends every pump that has not ended yet.
+        private func fail() {
+            lock.withLock { failed = true }
+            end(Array(pairs.indices))
+        }
+
+        /// Leaves the group once for each of `indices` that has not ended yet.
+        private func end(_ indices: [Int]) {
+            let leaving = lock.withLock {
+                indices.filter { index in
+                    defer { ended[index] = true }
+                    return !ended[index]
+                }
+            }
+            leaving.forEach { _ in group.leave() }
         }
     }
 }
