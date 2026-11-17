@@ -21,6 +21,13 @@ public enum L10n {
         case quit
         // Menu
         case startRecording, stopRecording
+        case menuWhatToRecord, modeVideoAndAudio, modeAudioOnly
+        case menuVideoSource, menuDisplays, menuWindows, sourceNotAvailable, mainDisplayPlaceholder
+        case menuAudio, systemAudio, microphone, microphoneNotConnected
+        case openRecordingsFolder, settingsEllipsis, preparingFile, openSystemSettings
+        // Settings window
+        case settingsTitle, settingsFolder, chooseFolder, settingsMaxResolution, settingsFramesPerSecond
+        case settingsKeepSeparateTracks, settingsMicrophone, systemDefaultMicrophone, settingsHotKey
         // Notifications
         case recordingSaved, recordingEmpty, recordingStopped
         case stoppedSourceLost, stoppedStreamError, stoppedDiskFull
@@ -48,6 +55,31 @@ public enum L10n {
         case .quit: return "Esci"
         case .startRecording: return "Avvia registrazione"
         case .stopRecording: return "Ferma registrazione"
+        case .menuWhatToRecord: return "Cosa registrare"
+        case .modeVideoAndAudio: return "Video + audio"
+        case .modeAudioOnly: return "Solo audio"
+        case .menuVideoSource: return "Sorgente video"
+        case .menuDisplays: return "Schermi"
+        case .menuWindows: return "Finestre"
+        case .sourceNotAvailable: return "Non più disponibile"
+        case .mainDisplayPlaceholder: return "Schermo principale"
+        case .menuAudio: return "Audio"
+        case .systemAudio: return "Audio di sistema"
+        case .microphone: return "Microfono"
+        case .microphoneNotConnected: return "non collegato"
+        case .openRecordingsFolder: return "Apri cartella registrazioni"
+        case .settingsEllipsis: return "Impostazioni…"
+        case .preparingFile: return "Preparazione del file…"
+        case .openSystemSettings: return "Apri Impostazioni di Sistema"
+        case .settingsTitle: return "Impostazioni di Nastro"
+        case .settingsFolder: return "Cartella registrazioni"
+        case .chooseFolder: return "Scegli…"
+        case .settingsMaxResolution: return "Risoluzione massima"
+        case .settingsFramesPerSecond: return "Fotogrammi al secondo"
+        case .settingsKeepSeparateTracks: return "Tieni tracce audio separate"
+        case .settingsMicrophone: return "Microfono"
+        case .systemDefaultMicrophone: return "Predefinito di sistema"
+        case .settingsHotKey: return "Scorciatoia"
         case .recordingSaved: return "Registrazione salvata"
         case .recordingEmpty: return "Registrazione vuota: nessun file salvato."
         case .recordingStopped: return "Registrazione interrotta"
@@ -81,6 +113,31 @@ public enum L10n {
         case .quit: return "Quit"
         case .startRecording: return "Start Recording"
         case .stopRecording: return "Stop Recording"
+        case .menuWhatToRecord: return "What to Record"
+        case .modeVideoAndAudio: return "Video + Audio"
+        case .modeAudioOnly: return "Audio Only"
+        case .menuVideoSource: return "Video Source"
+        case .menuDisplays: return "Displays"
+        case .menuWindows: return "Windows"
+        case .sourceNotAvailable: return "No longer available"
+        case .mainDisplayPlaceholder: return "Main Display"
+        case .menuAudio: return "Audio"
+        case .systemAudio: return "System Audio"
+        case .microphone: return "Microphone"
+        case .microphoneNotConnected: return "not connected"
+        case .openRecordingsFolder: return "Open Recordings Folder"
+        case .settingsEllipsis: return "Settings…"
+        case .preparingFile: return "Preparing the file…"
+        case .openSystemSettings: return "Open System Settings"
+        case .settingsTitle: return "Nastro Settings"
+        case .settingsFolder: return "Recordings folder"
+        case .chooseFolder: return "Choose…"
+        case .settingsMaxResolution: return "Maximum resolution"
+        case .settingsFramesPerSecond: return "Frames per second"
+        case .settingsKeepSeparateTracks: return "Keep separate audio tracks"
+        case .settingsMicrophone: return "Microphone"
+        case .systemDefaultMicrophone: return "System default"
+        case .settingsHotKey: return "Shortcut"
         case .recordingSaved: return "Recording saved"
         case .recordingEmpty: return "Empty recording: no file was saved."
         case .recordingStopped: return "Recording stopped"

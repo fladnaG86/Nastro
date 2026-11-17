@@ -2,7 +2,7 @@ import Foundation
 
 public enum RecordingMode: String, Codable, Sendable { case videoAndAudio, audioOnly }
 
-public enum VideoSource: Codable, Equatable, Sendable {
+public enum VideoSource: Codable, Hashable, Sendable {
     case mainDisplay, display(id: UInt32), window(id: UInt32)
 }
 

@@ -8,7 +8,7 @@ import NastroMedia
 import ScreenCaptureKit
 
 // NastroProbe: measures how the capture APIs really behave on this machine.
-// Subcommands: window-audio | audio-only | mic-format | crash-write <file> | inspect <file>
+// Subcommands: window-audio | audio-only | mic-format | crash-write <file> | inspect <file> | windows <owner>
 // Every capture subcommand ends with a line `RESULT <letter> yes|no <measure>`.
 
 func fail(_ message: String, code: Int32 = 1) -> Never {
@@ -351,11 +351,23 @@ func inspect(path: String) async throws {
     print("duration: \(String(format: "%.2f", duration.seconds)) s")
 }
 
+/// Prints `<window id> <title>` for each on-screen window owned by `owner` (for
+/// `screencapture -l`). Window titles need screen access; ids do not.
+func listWindows(owner: String) {
+    let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+        as? [[String: Any]] ?? []
+    for window in info where (window[kCGWindowOwnerName as String] as? String) == owner {
+        let id = window[kCGWindowNumber as String] as? Int ?? 0
+        let title = window[kCGWindowName as String] as? String ?? ""
+        print("\(id) \(title)")
+    }
+}
+
 // MARK: - Dispatch
 
 let arguments = CommandLine.arguments
 guard arguments.count >= 2 else {
-    fail("usage: NastroProbe window-audio | audio-only | mic-format | crash-write <file> | inspect <file>")
+    fail("usage: NastroProbe window-audio | audio-only | mic-format | crash-write <file> | inspect <file> | windows <owner>")
 }
 do {
     switch arguments[1] {
@@ -368,6 +380,9 @@ do {
     case "inspect":
         guard arguments.count >= 3 else { fail("usage: inspect <file>") }
         try await inspect(path: arguments[2])
+    case "windows":
+        guard arguments.count >= 3 else { fail("usage: windows <owner>") }
+        listWindows(owner: arguments[2])
     default:
         fail("unknown subcommand \(arguments[1])")
     }
