@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreMedia
 import CoreVideo
+import NastroMedia
 
 /// Synthetic media helpers for NastroMedia tests (no capture permission needed).
 enum TestMedia {
@@ -52,11 +53,11 @@ enum TestMedia {
         return sample!
     }
 
-    /// PCM float (non-interleaved) 440 Hz sine at amplitude 0.5, starting at `at`,
+    /// PCM float (non-interleaved) 440 Hz sine at `amplitude` (0 = silence), starting at `at`,
     /// lasting `duration` (rounded to whole sample frames). Phase follows absolute time,
     /// so consecutive blocks join seamlessly.
     static func tone(sampleRate: Double, channels: Int, at time: CMTime,
-                     duration: CMTime) -> CMSampleBuffer {
+                     duration: CMTime, amplitude: Double = 0.5) -> CMSampleBuffer {
         let frames = AVAudioFrameCount((duration.seconds * sampleRate).rounded())
         let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate,
                                    channels: AVAudioChannelCount(channels))!
@@ -67,7 +68,7 @@ enum TestMedia {
             let data = pcm.floatChannelData![channel]
             for index in 0..<Int(frames) {
                 let t = (firstFrame + Double(index)) / sampleRate
-                data[index] = Float(0.5 * sin(2 * Double.pi * 440 * t))
+                data[index] = Float(amplitude * sin(2 * Double.pi * 440 * t))
             }
         }
 
@@ -95,6 +96,105 @@ enum TestMedia {
         return (tracks.filter { $0.mediaType == .video }.count,
                 tracks.filter { $0.mediaType == .audio }.count,
                 duration.seconds)
+    }
+
+    /// An audio source for `makeWorkFile`: delivered for the whole duration, with the tone
+    /// audible only inside `toneRange` (seconds) and silence elsewhere.
+    struct WorkAudio {
+        let kind: SampleKind
+        let sampleRate: Double
+        let channels: Int
+        var toneRange: ClosedRange<Double>? = nil
+    }
+
+    /// Writes a real work file with `MovieWriter`: 640×360 frames at 30 fps (if `video`) and
+    /// 1024-frame audio blocks, interleaved in presentation order, every source starting at
+    /// the first timestamp so nothing waits for a missing format.
+    static func makeWorkFile(at url: URL, video: Bool, audio: [WorkAudio],
+                             duration: Double) async throws {
+        let spec = VideoSpec(width: 640, height: 360, fps: 30)
+        let writer = try MovieWriter(
+            url: url, video: video ? spec : nil,
+            systemAudio: audio.contains { $0.kind == .systemAudio },
+            microphone: audio.contains { $0.kind == .microphone })
+        let origin = 1000.0
+        var events: [(time: CMTime, kind: SampleKind, buffer: () -> CMSampleBuffer)] = []
+        if video {
+            for offset in stride(from: 0.0, to: duration, by: 1.0 / 30) {
+                let time = CMTime(seconds: origin + offset, preferredTimescale: 30_000)
+                events.append((time, .video, {
+                    videoFrame(width: spec.width, height: spec.height, at: time)
+                }))
+            }
+        }
+        for source in audio {
+            let rate = CMTimeScale(source.sampleRate)
+            var frame = Int64(origin * source.sampleRate)
+            let end = Int64((origin + duration) * source.sampleRate)
+            while frame < end {
+                let time = CMTime(value: frame, timescale: rate)
+                let offset = Double(frame) / source.sampleRate - origin
+                let audible = source.toneRange.map { $0.contains(offset) } ?? true
+                events.append((time, source.kind, {
+                    tone(sampleRate: source.sampleRate, channels: source.channels, at: time,
+                         duration: CMTime(value: 1024, timescale: rate),
+                         amplitude: audible ? 0.5 : 0)
+                }))
+                frame += 1024
+            }
+        }
+        events.sort { CMTimeCompare($0.time, $1.time) < 0 }
+        for event in events {
+            writer.append(event.kind, event.buffer())
+        }
+        guard case .written = try await writer.finish() else {
+            throw Failure("work file not written")
+        }
+    }
+
+    /// Codec of the first video track as a four-character string (e.g. "hvc1").
+    static func videoCodec(of url: URL) async throws -> String {
+        let asset = AVURLAsset(url: url)
+        guard let track = try await asset.loadTracks(withMediaType: .video).first,
+              let description = try await track.load(.formatDescriptions).first
+        else { throw Failure("no video track") }
+        let code = CMFormatDescriptionGetMediaSubType(description)
+        let bytes = [24, 16, 8, 0].map { UInt8((code >> $0) & 0xFF) }
+        return String(decoding: bytes, as: UTF8.self)
+    }
+
+    /// Peak level (dBFS) of all audio tracks mixed, over `from…to` seconds.
+    static func peakLevel(of url: URL, from start: Double, to end: Double) async throws -> Double {
+        let asset = AVURLAsset(url: url)
+        let tracks = try await asset.loadTracks(withMediaType: .audio)
+        guard !tracks.isEmpty else { throw Failure("no audio track") }
+        let reader = try AVAssetReader(asset: asset)
+        reader.timeRange = CMTimeRange(
+            start: CMTime(seconds: start, preferredTimescale: 48_000),
+            end: CMTime(seconds: end, preferredTimescale: 48_000))
+        let output = AVAssetReaderAudioMixOutput(audioTracks: tracks, audioSettings: [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVLinearPCMBitDepthKey: 32,
+            AVLinearPCMIsFloatKey: true,
+            AVLinearPCMIsNonInterleaved: false,
+            AVLinearPCMIsBigEndianKey: false,
+        ])
+        reader.add(output)
+        guard reader.startReading() else { throw reader.error ?? Failure("cannot read audio") }
+        var peak: Float = 0
+        while let buffer = output.copyNextSampleBuffer() {
+            guard let block = CMSampleBufferGetDataBuffer(buffer) else { continue }
+            let length = CMBlockBufferGetDataLength(block)
+            var data = [Float](repeating: 0, count: length / MemoryLayout<Float>.size)
+            let status = data.withUnsafeMutableBytes {
+                CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: length,
+                                           destination: $0.baseAddress!)
+            }
+            guard status == noErr else { throw Failure("cannot copy audio: \(status)") }
+            for value in data { peak = max(peak, abs(value)) }
+        }
+        guard reader.status == .completed else { throw reader.error ?? Failure("read failed") }
+        return peak > 0 ? 20 * log10(Double(peak)) : -.infinity
     }
 
     /// Sample rate and channel count of each audio track, in file order.
