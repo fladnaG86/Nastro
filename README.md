@@ -52,9 +52,11 @@ swift test                 # unit tests
 **Why the certificate matters.** `build.sh` signs with the "Nastro Dev" certificate if it exists,
 otherwise ad-hoc. With an ad-hoc signature macOS may treat every rebuild as a different app and ask
 for the Screen Recording permission again. A stable self-signed certificate is the intended way to
-avoid that. `scripts/make-dev-cert.sh` has not been run yet, so this is the plan, not something
-proven. If `codesign` cannot use the certificate, the script says to trust it for Code Signing in
-Keychain Access.
+avoid that. The script has been run once on the development Mac: the certificate was imported and
+`build.sh` signed with it (check with `codesign -dvv dist/Nastro.app`, which should show
+`Authority=Nastro Dev`; plain `-dv` does not print that line). Whether the Screen Recording permission
+then survives a rebuild has not been confirmed yet. If `codesign` cannot use the certificate, the
+script says to trust it for Code Signing in Keychain Access.
 
 ## Permissions
 
