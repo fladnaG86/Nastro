@@ -1,5 +1,4 @@
 import AppKit
-import CoreMedia
 import Foundation
 import NastroCore
 import NastroMedia
@@ -42,6 +41,8 @@ final class RecordingController: ObservableObject {
         let session: CaptureSession
         let writer: MovieWriter
         let sink: RecordingSink
+        /// Created by this recording (checked free before the writer made it), so the discard
+        /// paths may delete it; never a work file kept from an earlier recording.
         let workURL: URL
         let finalURL: URL
         let startedAt: TimeInterval
@@ -86,17 +87,13 @@ final class RecordingController: ObservableObject {
         elapsedSeconds = 0
         let s = settings.validated()
 
-        // Permissions: screen in every mode, microphone only when enabled.
-        switch RecordingRules.microphoneDecision(wanted: s.microphone, access: Self.microphoneAccess) {
+        // Permissions: screen first (every mode), then the microphone when enabled.
+        switch RecordingRules.permissionDecision(screenGranted: Permissions.screenGranted,
+                                                 microphoneWanted: s.microphone, microphone: Self.microphoneAccess) {
         case .proceed: break
-        case .ask:
+        case .askMicrophone:
             if !(await Permissions.requestMicrophone()) { return failStart(.microphonePermission) }
-        case .fail: return failStart(.microphonePermission)
-        }
-        if let problem = RecordingRules.permissionProblem(screenGranted: Permissions.screenGranted,
-                                                          microphoneWanted: s.microphone,
-                                                          microphoneAuthorized: Self.microphoneAccess == .authorized) {
-            return failStart(problem)
+        case .fail(let problem): return failStart(problem)
         }
 
         do { try Destination.prepare(s.outputFolder) } catch { return failStart(problem(for: .folder, s)) }
@@ -107,8 +104,14 @@ final class RecordingController: ObservableObject {
         let fileManager = FileManager.default
         let finalURL = FileNaming.finalURL(folder: s.outputFolder, date: Date(), timeZone: .current,
                                            hasVideo: s.mode == .videoAndAudio,
-                                           exists: { fileManager.fileExists(atPath: $0.path) })
+                                           exists: { final in
+                                               FileNaming.isTaken(final: final) { fileManager.fileExists(atPath: $0.path) }
+                                           })
         let workURL = FileNaming.workURL(forFinal: finalURL)
+        // The name rule keeps clear of kept work files; this guards the race with another
+        // writer. From here on, a file at `workURL` was created by this recording, so the
+        // failure and discard paths below may delete it.
+        guard !fileManager.fileExists(atPath: workURL.path) else { return failStart(problem(for: .other, s)) }
 
         let sink = RecordingSink(
             onLevels: { [weak self] system, microphone in
@@ -139,9 +142,10 @@ final class RecordingController: ObservableObject {
         do {
             try await session.start()
         } catch {
+            // Includes `CancellationError` (a stream stopped itself during start): no file, idle.
             await session.stop()
             _ = try? await writer.finish()        // nothing was accepted: deletes the file
-            try? fileManager.removeItem(at: workURL)
+            try? fileManager.removeItem(at: workURL)   // created by this recording (guard above)
             let failure: StartFailure
             switch error as? CaptureError {
             case .noPermission: failure = .permissionDenied
@@ -266,6 +270,7 @@ final class RecordingController: ObservableObject {
         defer {
             systemLevelDB = AudioLevel.floorDB
             microphoneLevelDB = AudioLevel.floorDB
+            warnings = []
             state = machine.state
         }
         let fileManager = FileManager.default
@@ -329,6 +334,7 @@ final class RecordingController: ObservableObject {
         _ = machine.apply(.startFailed)
         state = machine.state
         pendingStop = nil
+        warnings = []
         startProblem = problem
         lastOutcome = .notStarted(problem)
         Notifier.failed(L10n.t(.startFailed) + ": " + L10n.t(problem.messageKey))
@@ -353,104 +359,5 @@ final class RecordingController: ObservableObject {
     private static func freeBytes(at folder: URL) -> Int64? {
         let values = try? folder.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
         return values?.volumeAvailableCapacityForImportantUsage
-    }
-}
-
-/// The capture sink. Runs on the capture threads: forwards every buffer to the writer at
-/// once, measures audio peaks and feeds the silence detectors under a short lock, and hands
-/// levels to the main actor at most 10 times per second without ever waiting for it.
-final class RecordingSink: CaptureSink, @unchecked Sendable {
-    struct Snapshot {
-        let sawVideo: Bool
-        let systemSilent: Bool
-        let microphoneSilent: Bool
-        let lastSampleAt: [SampleKind: TimeInterval]
-
-        func secondsSinceSample(_ kind: SampleKind, now: TimeInterval) -> TimeInterval {
-            lastSampleAt[kind].map { now - $0 } ?? .infinity
-        }
-    }
-
-    static let levelInterval: TimeInterval = 0.1
-
-    static func now() -> TimeInterval { ProcessInfo.processInfo.systemUptime }
-
-    private let onLevels: @Sendable (Float?, Float?) -> Void
-    private let onStopped: @Sendable (Error?) -> Void
-    private let lock = NSLock()
-    private var writer: MovieWriter?
-    private var systemDetector = SilenceDetector()
-    private var microphoneDetector = SilenceDetector()
-    private var sawVideo = false
-    private var lastSampleAt: [SampleKind: TimeInterval] = [:]
-    private var pendingPeak: [SampleKind: Float] = [:]
-    private var lastPublishAt: TimeInterval = 0
-
-    /// `onLevels(system, microphone)`: the loudest peak (dBFS) since the previous call, `nil`
-    /// for a source with no samples in between. Both callbacks run on a capture thread.
-    init(onLevels: @escaping @Sendable (Float?, Float?) -> Void, onStopped: @escaping @Sendable (Error?) -> Void) {
-        self.onLevels = onLevels
-        self.onStopped = onStopped
-    }
-
-    func attach(_ writer: MovieWriter) { lock.withLock { self.writer = writer } }
-
-    /// Starts the silence grace periods.
-    func begin(at t: TimeInterval) {
-        lock.withLock {
-            systemDetector.start(at: t)
-            microphoneDetector.start(at: t)
-        }
-    }
-
-    func snapshot(at t: TimeInterval) -> Snapshot {
-        lock.withLock {
-            Snapshot(sawVideo: sawVideo, systemSilent: systemDetector.isSilent(at: t),
-                     microphoneSilent: microphoneDetector.isSilent(at: t), lastSampleAt: lastSampleAt)
-        }
-    }
-
-    func capture(_ kind: SampleKind, _ buffer: CMSampleBuffer) {
-        lock.withLock { writer }?.append(kind, buffer)
-        let t = Self.now()
-        guard kind != .video else {
-            lock.withLock { sawVideo = true }
-            return
-        }
-        let level = Self.peakDB(buffer)
-        let publish: (Float?, Float?)? = lock.withLock {
-            lastSampleAt[kind] = t
-            if let level {
-                if kind == .systemAudio {
-                    systemDetector.feed(levelDB: level, at: t)
-                } else {
-                    microphoneDetector.feed(levelDB: level, at: t)
-                }
-                pendingPeak[kind] = max(pendingPeak[kind] ?? AudioLevel.floorDB, level)
-            }
-            guard t - lastPublishAt >= Self.levelInterval, !pendingPeak.isEmpty else { return nil }
-            defer { pendingPeak = [:]; lastPublishAt = t }
-            return (pendingPeak[.systemAudio], pendingPeak[.microphone])
-        }
-        if let publish { onLevels(publish.0, publish.1) }
-    }
-
-    func captureStopped(error: Error?) { onStopped(error) }
-
-    /// Peak of float32 PCM over all channels; `nil` for other formats.
-    static func peakDB(_ buffer: CMSampleBuffer) -> Float? {
-        guard let format = CMSampleBufferGetFormatDescription(buffer),
-              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format)?.pointee,
-              asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0, asbd.mBitsPerChannel == 32 else { return nil }
-        var peak = AudioLevel.floorDB
-        try? buffer.withAudioBufferList { list, _ in
-            for audioBuffer in list {
-                guard let data = audioBuffer.mData else { continue }
-                let samples = UnsafeBufferPointer(start: data.assumingMemoryBound(to: Float.self),
-                                                  count: Int(audioBuffer.mDataByteSize) / MemoryLayout<Float>.size)
-                peak = max(peak, AudioLevel.peakDB(samples))
-            }
-        }
-        return peak
     }
 }

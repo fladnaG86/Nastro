@@ -50,11 +50,22 @@ final class RecordingRulesTests: XCTestCase {
                        [.microphoneLost])
         XCTAssertEqual(RecordingRules.warningsToNotify(current: [.microphoneLost], alreadyNotified: [.microphoneLost]),
                        [])
-        // Deterministic order: most serious first.
+        // Deterministic order: most serious first; silence is never notified.
         XCTAssertEqual(RecordingRules.warningsToNotify(current: [.systemAudioSilent, .microphoneNotRecorded,
-                                                                 .microphoneLost],
+                                                                 .microphoneLost, .systemAudioNotRecorded,
+                                                                 .microphoneSilent],
                                                        alreadyNotified: []),
-                       [.microphoneNotRecorded, .microphoneLost, .systemAudioSilent])
+                       [.microphoneNotRecorded, .systemAudioNotRecorded, .microphoneLost])
+        XCTAssertEqual(RecordingRules.warningsToNotify(current: [.systemAudioSilent, .microphoneSilent],
+                                                       alreadyNotified: []), [])
+    }
+
+    func testWhichWarningsNotify() {
+        XCTAssertTrue(Warning.microphoneLost.notifies)
+        XCTAssertTrue(Warning.systemAudioNotRecorded.notifies)
+        XCTAssertTrue(Warning.microphoneNotRecorded.notifies)
+        XCTAssertFalse(Warning.systemAudioSilent.notifies)
+        XCTAssertFalse(Warning.microphoneSilent.notifies)
     }
 
     // MARK: start problems
@@ -72,12 +83,19 @@ final class RecordingRulesTests: XCTestCase {
                                                       microphoneAuthorized: true))
     }
 
-    func testMicrophoneAccessDecision() {
-        XCTAssertEqual(RecordingRules.microphoneDecision(wanted: false, access: .denied), .proceed)
-        XCTAssertEqual(RecordingRules.microphoneDecision(wanted: false, access: .notDetermined), .proceed)
-        XCTAssertEqual(RecordingRules.microphoneDecision(wanted: true, access: .authorized), .proceed)
-        XCTAssertEqual(RecordingRules.microphoneDecision(wanted: true, access: .notDetermined), .ask)
-        XCTAssertEqual(RecordingRules.microphoneDecision(wanted: true, access: .denied), .fail)
+    func testPermissionDecision() {
+        func decide(screen: Bool = true, wanted: Bool, _ access: MicrophoneAccess) -> PermissionDecision {
+            RecordingRules.permissionDecision(screenGranted: screen, microphoneWanted: wanted, microphone: access)
+        }
+        XCTAssertEqual(decide(wanted: false, .denied), .proceed)
+        XCTAssertEqual(decide(wanted: false, .notDetermined), .proceed)
+        XCTAssertEqual(decide(wanted: true, .authorized), .proceed)
+        XCTAssertEqual(decide(wanted: true, .notDetermined), .askMicrophone)
+        XCTAssertEqual(decide(wanted: true, .denied), .fail(.microphonePermission))
+        // Screen first: no microphone prompt before a missing screen permission.
+        XCTAssertEqual(decide(screen: false, wanted: true, .notDetermined), .fail(.screenPermission))
+        XCTAssertEqual(decide(screen: false, wanted: true, .denied), .fail(.screenPermission))
+        XCTAssertEqual(decide(screen: false, wanted: false, .authorized), .fail(.screenPermission))
     }
 
     func testStartProblemForFailure() {

@@ -23,6 +23,19 @@ final class FileNamingTests: XCTestCase {
                        "2026-11-17 14.30 Call 3.mp4")
     }
 
+    func testKeptWorkFileTakesItsName() {
+        let f = URL(fileURLWithPath: "/tmp/x")
+        let onDisk: Set = ["2026-11-17 14.30 Call.nastro-partial.mov"]   // kept work file, no final file
+        let exists: (URL) -> Bool = { onDisk.contains($0.lastPathComponent) }
+        XCTAssertTrue(FileNaming.isTaken(final: f.appendingPathComponent("2026-11-17 14.30 Call.mp4"), exists: exists))
+        XCTAssertFalse(FileNaming.isTaken(final: f.appendingPathComponent("2026-11-17 14.30 Call 2.mp4"), exists: exists))
+        let final = FileNaming.finalURL(folder: f, date: date, timeZone: rome, hasVideo: true) {
+            FileNaming.isTaken(final: $0, exists: exists)
+        }
+        XCTAssertEqual(final.lastPathComponent, "2026-11-17 14.30 Call 2.mp4")
+        XCTAssertEqual(FileNaming.workURL(forFinal: final).lastPathComponent, "2026-11-17 14.30 Call 2.nastro-partial.mov")
+    }
+
     func testWorkFileRoundTrip() {
         let final = URL(fileURLWithPath: "/tmp/x/2026-11-17 14.30 Call.mp4")
         let work = FileNaming.workURL(forFinal: final)

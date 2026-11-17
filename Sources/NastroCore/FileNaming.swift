@@ -22,6 +22,13 @@ public enum FileNaming {
             .appendingPathComponent(url.deletingPathExtension().lastPathComponent + workSuffix)
     }
 
+    /// A final name is taken if the final file or its work file exists: a work file kept after
+    /// a failed or skipped finalization must never be reused (overwritten or deleted) by a new
+    /// recording. Pass this as the `exists` of `finalURL(folder:…)` when starting a recording.
+    public static func isTaken(final url: URL, exists: (URL) -> Bool) -> Bool {
+        exists(url) || exists(workURL(forFinal: url))
+    }
+
     public static func isWorkFile(_ url: URL) -> Bool {
         url.lastPathComponent.hasSuffix(workSuffix)
     }

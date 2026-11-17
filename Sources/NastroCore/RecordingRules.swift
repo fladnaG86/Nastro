@@ -17,6 +17,15 @@ public enum Warning: Hashable, Sendable {
         }
     }
 
+    /// Silence is only shown in the menu; a voice or source that is not being recorded is
+    /// also notified.
+    public var notifies: Bool {
+        switch self {
+        case .microphoneLost, .systemAudioNotRecorded, .microphoneNotRecorded: return true
+        case .systemAudioSilent, .microphoneSilent: return false
+        }
+    }
+
     /// Lower is more serious.
     fileprivate var severity: Int {
         switch self {
@@ -52,8 +61,8 @@ public enum StartFailure: Equatable, Sendable {
 /// Microphone authorization, independent of AVFoundation.
 public enum MicrophoneAccess: Equatable, Sendable { case authorized, notDetermined, denied }
 
-/// What `start()` does about the microphone permission before capturing.
-public enum MicrophoneDecision: Equatable, Sendable { case proceed, ask, fail }
+/// What `start()` does about permissions before capturing.
+public enum PermissionDecision: Equatable, Sendable { case proceed, askMicrophone, fail(StartProblem) }
 
 /// What is known about one enabled audio source at a timer tick.
 public struct AudioSourceFacts: Equatable, Sendable {
@@ -101,17 +110,22 @@ public enum RecordingRules {
         return now - last >= grace
     }
 
-    /// Warnings in `current` not yet notified during this recording, most serious first.
+    /// Warnings in `current` that notify and were not yet notified during this recording, most
+    /// serious first.
     public static func warningsToNotify(current: Set<Warning>, alreadyNotified: Set<Warning>) -> [Warning] {
-        current.subtracting(alreadyNotified).sorted { $0.severity < $1.severity }
+        current.subtracting(alreadyNotified).filter(\.notifies).sorted { $0.severity < $1.severity }
     }
 
-    public static func microphoneDecision(wanted: Bool, access: MicrophoneAccess) -> MicrophoneDecision {
-        guard wanted else { return .proceed }
+    /// Screen first (needed in every mode), so a missing screen permission is never preceded by
+    /// a microphone prompt; then the microphone, only when enabled, asked for if undetermined.
+    public static func permissionDecision(screenGranted: Bool, microphoneWanted: Bool,
+                                          microphone access: MicrophoneAccess) -> PermissionDecision {
+        guard screenGranted else { return .fail(.screenPermission) }
+        guard microphoneWanted else { return .proceed }
         switch access {
         case .authorized: return .proceed
-        case .notDetermined: return .ask
-        case .denied: return .fail
+        case .notDetermined: return .askMicrophone
+        case .denied: return .fail(.microphonePermission)
         }
     }
 
