@@ -142,6 +142,74 @@ final class FinalizerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: workURL.path))
     }
 
+    func testWritesUnderFinalizingNameAndRenamesWhenComplete() async throws {
+        // F5: while the copy runs, nothing exists at the final name, only at
+        // "<name>.nastro-finalizing.mp4"; after success only the final name exists.
+        try await makeWorkWithBothSources()
+        let final = directory.appendingPathComponent("final.mp4")
+        let temporary = directory.appendingPathComponent("final.nastro-finalizing.mp4")
+        let seen = Outcome()
+
+        try await Finalizer.finalize(
+            workFile: workURL, to: final, keepSeparateTracks: false,
+            failAppend: { mediaType, appended in
+                if mediaType == .video, appended == 30 {
+                    let fileManager = FileManager.default
+                    seen.set([fileManager.fileExists(atPath: final.path),
+                              fileManager.fileExists(atPath: temporary.path)])
+                }
+                return false
+            })
+
+        XCTAssertEqual(seen.value as? [Bool], [false, true], "[final exists, finalizing exists] mid-copy")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: final.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temporary.path))
+        let tracks = try await TestMedia.tracks(of: final)
+        XCTAssertEqual(tracks.video, 1)
+        XCTAssertEqual(tracks.audio, 1)
+    }
+
+    func testFinalNameAppearingDuringFinalizationIsNotOverwritten() async throws {
+        // F5: a file that appears at the final name while the copy runs is left as it is;
+        // finalize throws .exportFailed, removes its finalizing file and keeps the work file.
+        try await makeWorkWithBothSources()
+        let final = directory.appendingPathComponent("final.mp4")
+        let temporary = directory.appendingPathComponent("final.nastro-finalizing.mp4")
+        let original = Data("someone else's file".utf8)
+
+        do {
+            try await Finalizer.finalize(
+                workFile: workURL, to: final, keepSeparateTracks: false,
+                failAppend: { mediaType, appended in
+                    if mediaType == .video, appended == 30,
+                       !FileManager.default.fileExists(atPath: final.path) {
+                        FileManager.default.createFile(atPath: final.path, contents: original)
+                    }
+                    return false
+                })
+            XCTFail("expected FinalizeError.exportFailed")
+        } catch let error as FinalizeError {
+            XCTAssertEqual(error, .exportFailed)
+        }
+        XCTAssertEqual(try? Data(contentsOf: final), original)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temporary.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: workURL.path))
+    }
+
+    func testStaleFinalizingFileDoesNotBlockFinalization() async throws {
+        // F5: a leftover finalizing file (never anyone's only copy) is replaced.
+        try await makeWorkWithBothSources()
+        let final = directory.appendingPathComponent("final.mp4")
+        let temporary = directory.appendingPathComponent("final.nastro-finalizing.mp4")
+        try Data("junk".utf8).write(to: temporary)
+
+        try await Finalizer.finalize(workFile: workURL, to: final, keepSeparateTracks: false)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temporary.path))
+        let tracks = try await TestMedia.tracks(of: final)
+        XCTAssertEqual(tracks.video, 1)
+    }
+
     func testUnreadableWorkFileThrowsAndLeavesNoOutput() async throws {
         // file di lavoro da 0 byte → throws FinalizeError.unreadable ; final non esiste ;
         // il file di lavoro esiste ancora

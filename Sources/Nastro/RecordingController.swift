@@ -255,7 +255,8 @@ final class RecordingController: ObservableObject {
 
         if active.writer.failure != nil {
             await stop(.streamError)
-        } else if let free = Self.freeBytes(at: active.settings.outputFolder), DiskGuard.shouldStop(freeBytes: free) {
+        } else if let free = Self.freeBytes(at: active.settings.outputFolder),
+                  DiskGuard.shouldStop(freeBytes: free, workFileBytes: Self.fileSize(active.workURL)) {
             await stop(.diskFull)
         }
     }
@@ -295,9 +296,8 @@ final class RecordingController: ObservableObject {
             return end(.empty, finalized: true)
         }
 
-        let size = ((try? fileManager.attributesOfItem(atPath: active.workURL.path))?[.size] as? NSNumber)?.int64Value ?? 0
         guard RecordingRules.hasRoomToFinalize(freeBytes: Self.freeBytes(at: active.settings.outputFolder),
-                                               workFileBytes: size) else {
+                                               workFileBytes: Self.fileSize(active.workURL)) else {
             Notifier.failed(L10n.t(.noRoomToFinalize) + " " + L10n.t(.workFileKept), file: active.workURL)
             return end(.keptWorkFile(active.workURL), finalized: false)
         }
@@ -357,7 +357,11 @@ final class RecordingController: ObservableObject {
     }
 
     private static func freeBytes(at folder: URL) -> Int64? {
-        let values = try? folder.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-        return values?.volumeAvailableCapacityForImportantUsage
+        Recovery.volumeFreeBytes(folder)
+    }
+
+    /// Current size of `url` in bytes; 0 if it does not exist (yet).
+    private static func fileSize(_ url: URL) -> Int64 {
+        ((try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? NSNumber)?.int64Value ?? 0
     }
 }

@@ -36,6 +36,8 @@ public enum L10n {
         case stoppedSourceLost, stoppedStreamError, stoppedDiskFull
         case writeFailed, finalizeFailed, noRoomToFinalize, workFileKept
         case recordingRecovered, recordingDamaged
+        /// %@ = the work file's name.
+        case recoveryNoRoom
         case startFailed, noFirstFrame
         // Warnings
         case warningSystemAudioSilent, warningMicrophoneSilent, warningMicrophoneLost
@@ -99,6 +101,7 @@ public enum L10n {
         case .workFileKept: return "Il file di lavoro è stato conservato e verrà recuperato al prossimo avvio:"
         case .recordingRecovered: return "Registrazione recuperata"
         case .recordingDamaged: return "Registrazione interrotta non recuperabile"
+        case .recoveryNoRoom: return "Spazio insufficiente per preparare %@: libera spazio e riapri Nastro."
         case .startFailed: return "Impossibile avviare la registrazione"
         case .noFirstFrame: return "Nessuna immagine dallo schermo entro 5 secondi: registrazione annullata."
         case .warningSystemAudioSilent: return "Audio di sistema muto"
@@ -161,6 +164,7 @@ public enum L10n {
         case .workFileKept: return "The work file was kept and will be recovered at the next launch:"
         case .recordingRecovered: return "Recording recovered"
         case .recordingDamaged: return "Interrupted recording could not be recovered"
+        case .recoveryNoRoom: return "Not enough space to prepare %@; free some space and reopen Nastro."
         case .startFailed: return "Could not start recording"
         case .noFirstFrame: return "No image from the screen within 5 seconds: recording cancelled."
         case .warningSystemAudioSilent: return "System audio is silent"

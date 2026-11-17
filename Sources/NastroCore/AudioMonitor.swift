@@ -41,4 +41,13 @@ public struct SilenceDetector: Sendable {
 public enum DiskGuard {
     public static let minimumFreeBytes: Int64 = 1_000_000_000
     public static func shouldStop(freeBytes: Int64) -> Bool { freeBytes < minimumFreeBytes }
+    /// Room kept beyond the work file's size, so finalizing (a copy about as large as the
+    /// work file) still fits when the recording stops.
+    public static let finalizeMarginBytes: Int64 = 500_000_000
+
+    /// Stops when free space is below the work file's size plus `finalizeMarginBytes`, and
+    /// never later than at `minimumFreeBytes`.
+    public static func shouldStop(freeBytes: Int64, workFileBytes: Int64) -> Bool {
+        freeBytes < max(workFileBytes + finalizeMarginBytes, minimumFreeBytes)
+    }
 }

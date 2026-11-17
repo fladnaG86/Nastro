@@ -22,15 +22,31 @@ public enum FileNaming {
             .appendingPathComponent(url.deletingPathExtension().lastPathComponent + workSuffix)
     }
 
-    /// A final name is taken if the final file or its work file exists: a work file kept after
-    /// a failed or skipped finalization must never be reused (overwritten or deleted) by a new
-    /// recording. Pass this as the `exists` of `finalURL(folder:…)` when starting a recording.
+    /// A final name is taken if the final file, its work file or its finalizing file exists: a
+    /// work file kept after a failed or skipped finalization must never be reused (overwritten
+    /// or deleted) by a new recording, and a finalization in progress will claim the name.
+    /// Pass this as the `exists` of `finalURL(folder:…)` when starting a recording.
     public static func isTaken(final url: URL, exists: (URL) -> Bool) -> Bool {
-        exists(url) || exists(workURL(forFinal: url))
+        exists(url) || exists(workURL(forFinal: url)) || exists(finalizingURL(forFinal: url))
     }
 
     public static func isWorkFile(_ url: URL) -> Bool {
         url.lastPathComponent.hasSuffix(workSuffix)
+    }
+
+    /// Placed before the extension of the temporary file a finalization writes
+    /// ("<name>.nastro-finalizing.mp4" / ".m4a"); it is renamed to the final name only once
+    /// complete. Never anyone's only copy: its work file exists until the rename succeeded.
+    public static let finalizingSuffix = ".nastro-finalizing"
+
+    public static func finalizingURL(forFinal url: URL) -> URL {
+        url.deletingLastPathComponent().appendingPathComponent(
+            url.deletingPathExtension().lastPathComponent + finalizingSuffix + "." + url.pathExtension)
+    }
+
+    public static func isFinalizingFile(_ url: URL) -> Bool {
+        let name = url.lastPathComponent
+        return ["mp4", "m4a"].contains { name.hasSuffix(finalizingSuffix + "." + $0) }
     }
 
     public static func finalURL(forWorkFile url: URL, hasVideo: Bool,

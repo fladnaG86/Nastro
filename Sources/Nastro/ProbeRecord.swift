@@ -10,7 +10,8 @@ import NastroMedia
 /// with `PROBE-RECORD ok <file>` (exit 0) or `PROBE-RECORD failed <reason>` (exit 1).
 ///
 /// `Nastro --probe-recover` runs `recoverLeftovers()` on the default folder and prints one
-/// `PROBE-RECOVER recovered|damaged <file>` line per outcome (`PROBE-RECOVER none` if none).
+/// `PROBE-RECOVER recovered|damaged|no-room|failed <file>` line per outcome (`PROBE-RECOVER none`
+/// if none).
 ///
 /// Settings go to a throwaway defaults domain so the app's own settings are never touched.
 @MainActor
@@ -39,6 +40,8 @@ enum ProbeRecord {
                 switch outcome {
                 case .recovered(let url): print("PROBE-RECOVER recovered \(url.path)")
                 case .damaged(let url): print("PROBE-RECOVER damaged \(url.path)")
+                case .noRoom(let url): print("PROBE-RECOVER no-room \(url.path)")
+                case .failed(let url): print("PROBE-RECOVER failed \(url.path)")
                 }
             }
             cleanUp()

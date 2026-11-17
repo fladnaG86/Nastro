@@ -52,6 +52,33 @@ final class FileNamingTests: XCTestCase {
         XCTAssertEqual(r.lastPathComponent, "2026-11-17 14.30 Call 2.mp4")
     }
 
+    func testFinalizingNameSitsNextToTheFinalName() {
+        let video = URL(fileURLWithPath: "/tmp/x/2026-11-17 14.30 Call.mp4")
+        let audio = URL(fileURLWithPath: "/tmp/x/2026-11-17 14.30 Call 2.m4a")
+        let videoTemp = FileNaming.finalizingURL(forFinal: video)
+        XCTAssertEqual(videoTemp.lastPathComponent, "2026-11-17 14.30 Call.nastro-finalizing.mp4")
+        XCTAssertEqual(videoTemp.deletingLastPathComponent().path, "/tmp/x")
+        XCTAssertEqual(FileNaming.finalizingURL(forFinal: audio).lastPathComponent,
+                       "2026-11-17 14.30 Call 2.nastro-finalizing.m4a")
+        XCTAssertTrue(FileNaming.isFinalizingFile(videoTemp))
+        XCTAssertTrue(FileNaming.isFinalizingFile(FileNaming.finalizingURL(forFinal: audio)))
+        XCTAssertFalse(FileNaming.isFinalizingFile(video))
+        XCTAssertFalse(FileNaming.isFinalizingFile(FileNaming.workURL(forFinal: video)))
+        XCTAssertFalse(FileNaming.isFinalizingFile(URL(fileURLWithPath: "/tmp/x/notes.nastro-finalizing.txt")))
+        XCTAssertFalse(FileNaming.isWorkFile(videoTemp))
+    }
+
+    func testFinalizingFileTakesItsName() {
+        let f = URL(fileURLWithPath: "/tmp/x")
+        let onDisk: Set = ["2026-11-17 14.30 Call.nastro-finalizing.mp4"]   // another finalization in progress
+        let exists: (URL) -> Bool = { onDisk.contains($0.lastPathComponent) }
+        XCTAssertTrue(FileNaming.isTaken(final: f.appendingPathComponent("2026-11-17 14.30 Call.mp4"), exists: exists))
+        let final = FileNaming.finalURL(folder: f, date: date, timeZone: rome, hasVideo: true) {
+            FileNaming.isTaken(final: $0, exists: exists)
+        }
+        XCTAssertEqual(final.lastPathComponent, "2026-11-17 14.30 Call 2.mp4")
+    }
+
     func testPrepareCreatesFolder() throws {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("nastro-test-\(UUID())")
         let folder = base.appendingPathComponent("a/b")

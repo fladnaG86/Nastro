@@ -43,6 +43,11 @@ enum Notifier {
             switch outcome {
             case .recovered(let url): recovered.append(url)
             case .damaged(let url): damaged.append(url)
+            case .noRoom(let url):
+                post(title: L10n.t(.appName),
+                     body: String(format: L10n.t(.recoveryNoRoom), url.lastPathComponent), file: url)
+            case .failed(let url):
+                failed(L10n.t(.finalizeFailed) + " " + L10n.t(.workFileKept), file: url)
             }
         }
         if !recovered.isEmpty {

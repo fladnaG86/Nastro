@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreMedia
+import NastroCore
 
 public enum FinalizeError: Error, Equatable { case unreadable, noTracks, exportFailed }
 
@@ -28,8 +29,10 @@ public enum Finalizer {
 
     /// The file type (mp4 or m4a) follows the content: video → mp4, audio only → m4a,
     /// whatever the extension of `final`; the caller names the file with `hasVideo`.
-    /// Never deletes `workFile`: the caller does that after success. On failure, whatever
-    /// was written at `final` is deleted.
+    /// Never deletes `workFile`: the caller does that after success. The copy is written to
+    /// `FileNaming.finalizingURL(forFinal: final)` and renamed to `final` only once complete;
+    /// on failure (including `final` appearing meanwhile) the temporary file is deleted and
+    /// nothing at `final` is touched.
     public static func finalize(workFile: URL, to final: URL, keepSeparateTracks: Bool) async throws {
         try await finalize(workFile: workFile, to: final, keepSeparateTracks: keepSeparateTracks,
                            failAppend: nil)
@@ -59,13 +62,19 @@ public enum Finalizer {
         } catch {
             throw FinalizeError.unreadable
         }
+        let fileManager = FileManager.default
         // Never overwrite (or, on failure, delete) a file that was already there.
-        guard !FileManager.default.fileExists(atPath: final.path) else {
+        guard !fileManager.fileExists(atPath: final.path) else {
             throw FinalizeError.exportFailed
         }
+        // The copy is written under a temporary sibling name, so an interrupted finalization
+        // never leaves a partial file under the final name. A leftover temporary file is never
+        // anyone's only copy (its work file still exists): it is replaced.
+        let temporary = FileNaming.finalizingURL(forFinal: final)
+        try? fileManager.removeItem(at: temporary)
         let writer: AVAssetWriter
         do {
-            writer = try AVAssetWriter(outputURL: final,
+            writer = try AVAssetWriter(outputURL: temporary,
                                        fileType: videoTracks.isEmpty ? .m4a : .mp4)
         } catch {
             throw FinalizeError.exportFailed
@@ -79,8 +88,16 @@ public enum Finalizer {
         } catch {
             if writer.status == .writing { writer.cancelWriting() }
             reader.cancelReading()
-            try? FileManager.default.removeItem(at: final)
+            try? fileManager.removeItem(at: temporary)
             throw error
+        }
+        // `moveItem` never replaces an existing file: a file that appeared at the final name
+        // meanwhile is left alone.
+        do {
+            try fileManager.moveItem(at: temporary, to: final)
+        } catch {
+            try? fileManager.removeItem(at: temporary)
+            throw FinalizeError.exportFailed
         }
     }
 
