@@ -46,13 +46,17 @@ la registrazione.
   mentre registra, che entrambe le sorgenti audio stanno arrivando.
 - Un file finale che in alcuni player fa sentire solo una delle due voci.
 - Toccare Postino: nessuna modifica a `~/Postino`, nessuna scorciatoia che
-  entri in conflitto con le sue (Postino usa ⌃⌥S, ⌃⌥R, ⌃⌥T).
+  entri in conflitto con le sue (Postino usa ⌃⌥S, ⌃⌥R, ⌃⌥T). La scorciatoia
+  di Nastro è ⌃⌥N, confermata da Maurizio.
 
 ## Vincoli
 
 - macOS 15 o successivo: la cattura del microfono dentro ScreenCaptureKit
   (`SCStreamConfiguration.captureMicrophone`, uscita di tipo `.microphone`)
   esiste da macOS 15. La macchina di sviluppo è su macOS 27.3, Apple Silicon.
+  Il target di compilazione è macOS 15, ma l'app viene provata solo su 27.3:
+  il funzionamento sulle versioni intermedie non è garantito né richiesto
+  (scelta di Claude).
 - Swift + Swift Package Manager, senza progetto Xcode, come Postino: un
   target `NastroCore` con la logica testabile, un target eseguibile `Nastro`,
   un target di test, uno `build.sh` che assembla `dist/Nastro.app` con
@@ -70,6 +74,10 @@ la registrazione.
   AGPL-3.0: non copiare.
 - Repository: `~/Nastro`, GitHub `fladnaG86/Nastro`, privata finché l'app non
   funziona. Licenza MIT, README in inglese e italiano come Postino.
+  Maurizio ha chiesto una repository separata su GitHub e ha approvato nome
+  e visibilità: la repository privata va creata all'inizio del lavoro e i
+  commit vanno pubblicati lì. Renderla pubblica richiede una sua conferma
+  esplicita.
 
 ## Approcci considerati
 
@@ -219,8 +227,6 @@ come Postino.
 Maurizio ha approvato la bozza in blocco; questi punti sono proposte da
 correggere se sbagliate:
 
-- Scorciatoia ⌃⌥N. La bozza mostrata diceva ⌃⌥R, ma ⌃⌥R è già "rispondi" in
-  Postino.
 - File di lavoro `.mov` a frammenti e poi conversione: nella bozza era solo
   "file scritto a frammenti".
 - Finestre di Nastro escluse dalla cattura; audio di sistema sempre globale.
