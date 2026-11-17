@@ -82,11 +82,103 @@ final class MovieWriterTests: XCTestCase {
         let duration = try writtenDuration(try await writer.finish())
         XCTAssertEqual(duration, 3, accuracy: 0.2)
         XCTAssertNil(writer.failure)
+        XCTAssertEqual(writer.sourcesWithoutTrack, [])
+        XCTAssertEqual(writer.degradedSources, [])
 
         let tracks = try await TestMedia.tracks(of: workURL)
         XCTAssertEqual(tracks.video, 1)
         XCTAssertEqual(tracks.audio, 2)
         XCTAssertEqual(tracks.duration, 3, accuracy: 0.2)
+    }
+
+    func testLateSourceIsReportedWithoutTrack() async throws {
+        // Fix round 1, finding 2: mic expected, first mic buffer 3 s after the first frame
+        // → sourcesWithoutTrack == [.microphone], audio 1, no failure.
+        let writer = try MovieWriter(url: workURL, video: spec, systemAudio: true, microphone: true)
+        XCTAssertEqual(writer.sourcesWithoutTrack, [], "empty before the session starts")
+        feed(writer, origin: 1000, videoTimes: frames(from: 0, until: 5), audio: [
+            AudioSource(kind: .systemAudio, sampleRate: 48_000, channels: 2, until: 5),
+            AudioSource(kind: .microphone, sampleRate: 48_000, channels: 1, from: 3, until: 5),
+        ])
+        XCTAssertEqual(writer.sourcesWithoutTrack, [.microphone], "readable while recording")
+        _ = try writtenDuration(try await writer.finish())
+        XCTAssertNil(writer.failure)
+        XCTAssertEqual(writer.sourcesWithoutTrack, [.microphone])
+
+        let tracks = try await TestMedia.tracks(of: workURL)
+        XCTAssertEqual(tracks.audio, 1)
+    }
+
+    func testMicrophoneFormatChangeDegradesOnlyThatSource() async throws {
+        // Fix round 1, finding 3a: mic 48 kHz mono 2 s then 16 kHz mono 2 s, video + system 4 s
+        // → no failure, degradedSources == [.microphone], video ≈ 4 s, two audio tracks.
+        let writer = try MovieWriter(url: workURL, video: spec, systemAudio: true, microphone: true)
+        feed(writer, origin: 1000, videoTimes: frames(from: 0, until: 4), audio: [
+            AudioSource(kind: .systemAudio, sampleRate: 48_000, channels: 2, until: 4),
+            AudioSource(kind: .microphone, sampleRate: 48_000, channels: 1, until: 2),
+            AudioSource(kind: .microphone, sampleRate: 16_000, channels: 1, from: 2, until: 4),
+        ])
+        let duration = try writtenDuration(try await writer.finish())
+        XCTAssertNil(writer.failure)
+        XCTAssertEqual(writer.degradedSources, [.microphone])
+        XCTAssertEqual(duration, 4, accuracy: 0.2)
+
+        let tracks = try await TestMedia.tracks(of: workURL)
+        XCTAssertEqual(tracks.audio, 2)
+        let asset = AVURLAsset(url: workURL)
+        let videoTracks = try await asset.loadTracks(withMediaType: .video)
+        XCTAssertEqual(videoTracks.count, 1)
+        let range = try await videoTracks[0].load(.timeRange)
+        XCTAssertEqual(range.duration.seconds, 4, accuracy: 0.2)
+    }
+
+    func testBackwardsAudioTimestampIsDropped() async throws {
+        // Fix round 1, finding 3b: one system-audio buffer earlier than the previous one in
+        // the middle of 3 s → no failure, duration ≈ 3, degradedSources empty.
+        let writer = try MovieWriter(url: workURL, video: spec, systemAudio: true, microphone: false)
+        feed(writer, origin: 1000, videoTimes: frames(from: 0, until: 1.5), audio: [
+            AudioSource(kind: .systemAudio, sampleRate: 48_000, channels: 2, until: 1.5),
+        ])
+        writer.append(.systemAudio, TestMedia.tone(
+            sampleRate: 48_000, channels: 2, at: CMTime(value: 1001 * 48_000, timescale: 48_000),
+            duration: CMTime(value: 1024, timescale: 48_000)))
+        feed(writer, origin: 1000, videoTimes: frames(from: 1.5, until: 3), audio: [
+            AudioSource(kind: .systemAudio, sampleRate: 48_000, channels: 2, from: 1.5, until: 3),
+        ])
+        let duration = try writtenDuration(try await writer.finish())
+        XCTAssertNil(writer.failure)
+        XCTAssertEqual(duration, 3, accuracy: 0.2)
+        XCTAssertEqual(writer.degradedSources, [])
+    }
+
+    func testRepeatedFinishReturnsSameOutcomeAndKeepsFile() async throws {
+        // Fix round 1, finding 1: a second finish() (sequential or concurrent) returns the
+        // first outcome and never deletes the recording.
+        let sequential = try MovieWriter(url: workURL, video: spec, systemAudio: true,
+                                         microphone: false)
+        feed(sequential, origin: 1000, videoTimes: frames(from: 0, until: 1), audio: [
+            AudioSource(kind: .systemAudio, sampleRate: 48_000, channels: 2, until: 1),
+        ])
+        let first = try await sequential.finish()
+        let second = try await sequential.finish()
+        XCTAssertEqual(second, first)
+        _ = try writtenDuration(first)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: workURL.path))
+
+        let concurrentURL = directory.appendingPathComponent("concurrent.mov")
+        let concurrent = try MovieWriter(url: concurrentURL, video: spec, systemAudio: true,
+                                         microphone: false)
+        feed(concurrent, origin: 1000, videoTimes: frames(from: 0, until: 1), audio: [
+            AudioSource(kind: .systemAudio, sampleRate: 48_000, channels: 2, until: 1),
+        ])
+        async let a = concurrent.finish()
+        async let b = concurrent.finish()
+        let (resultA, resultB) = try await (a, b)
+        XCTAssertEqual(resultA, resultB)
+        _ = try writtenDuration(resultA)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: concurrentURL.path))
+        let tracks = try await TestMedia.tracks(of: concurrentURL)
+        XCTAssertEqual(tracks.video, 1)
     }
 
     func testAudioOnly() async throws {

@@ -45,6 +45,11 @@ public final class MovieWriter: @unchecked Sendable {
     private var lastAudioTime = CMTime.invalid
     private var endTime = CMTime.invalid
     private var firstError: Error?
+    private var finishTask: Task<WriteResult, Error>?
+    private var sessionStarted = false
+    private var degraded: Set<SampleKind> = []
+    /// Last appended presentation time per audio source.
+    private var lastAppendedAudio: [SampleKind: CMTime] = [:]
 
     /// `video == nil` → audio only. Creates the file at `url` (.mov).
     public init(url: URL, video: VideoSpec?, systemAudio: Bool, microphone: Bool) throws {
@@ -87,6 +92,21 @@ public final class MovieWriter: @unchecked Sendable {
         return firstError
     }
 
+    /// Audio sources enabled in `init` that got no track because they had not shown their
+    /// format when writing started. Empty until the session starts. Readable from any thread.
+    public var sourcesWithoutTrack: Set<SampleKind> {
+        lock.withLock {
+            guard sessionStarted else { return [] }
+            return Set(expectedAudio).subtracting(audioInputs.keys)
+        }
+    }
+
+    /// Audio sources whose format changed after their track was created. Their track ends at
+    /// the change and all their later buffers are dropped. Readable from any thread.
+    public var degradedSources: Set<SampleKind> {
+        lock.withLock { degraded }
+    }
+
     /// Callable from any thread; serialised internally. Never blocks waiting for the encoder:
     /// a sample the input is not ready for is dropped.
     public func append(_ kind: SampleKind, _ buffer: CMSampleBuffer) {
@@ -105,7 +125,19 @@ public final class MovieWriter: @unchecked Sendable {
     /// Closes the file. Returns `.empty` (and deletes the file) if no sample was ever accepted.
     /// If writing failed, throws `failure` and leaves the work file on disk (it is fragmented,
     /// so what was written before the failure may still be recoverable).
+    /// Calling it again returns the first call's outcome (waiting for it if still running).
     public func finish() async throws -> WriteResult {
+        let task: Task<WriteResult, Error> = lock.withLock {
+            if let finishTask { return finishTask }
+            let task = Task { try await self.closeFile() }
+            finishTask = task
+            return task
+        }
+        return try await task.value
+    }
+
+    /// The one-time body of `finish()`.
+    private func closeFile() async throws -> WriteResult {
         enum Step { case close(start: CMTime), discard, fail(Error) }
         let step: Step = lock.withLock {
             if phase == .collecting, waitStart != nil {
@@ -117,9 +149,13 @@ public final class MovieWriter: @unchecked Sendable {
             case .failed:
                 phase = .done
                 return .fail(firstError ?? AVError(.unknown))
-            case .collecting, .finishing, .done:
+            case .collecting:
+                // Nothing was ever accepted: the file was never started.
                 phase = .done
                 return .discard
+            case .finishing, .done:
+                // Unreachable: this body runs once. Never touch the file here.
+                return .fail(firstError ?? AVError(.unknown))
             }
             phase = .finishing
             extendStaticScreen()
@@ -240,6 +276,7 @@ public final class MovieWriter: @unchecked Sendable {
             return
         }
         writer.startSession(atSourceTime: sessionStart)
+        sessionStarted = true
         phase = .writing
 
         if let frame { write(.video, frame) }
@@ -265,6 +302,21 @@ public final class MovieWriter: @unchecked Sendable {
             if lastVideoTime.isValid, time <= lastVideoTime { return }
         case .systemAudio, .microphone:
             input = audioInputs[kind]
+            guard input != nil, !degraded.contains(kind) else { return }
+            // A format change (e.g. the mic device switched rate) ends this source's track
+            // instead of risking a failed append that would stop the whole recording.
+            guard let trackFormat = audioFormats[kind],
+                  let format = CMSampleBufferGetFormatDescription(buffer),
+                  CMAudioFormatDescriptionEqual(
+                      trackFormat, otherFormatDescription: format,
+                      equalityMask: kCMAudioFormatDescriptionMask_StreamBasicDescription,
+                      equalityMaskOut: nil)
+            else {
+                degraded.insert(kind)
+                return
+            }
+            // Audio must advance per source; a stray backwards buffer is just dropped.
+            if let last = lastAppendedAudio[kind], time <= last { return }
         }
         guard let input, input.isReadyForMoreMediaData else { return }
 
@@ -278,8 +330,9 @@ public final class MovieWriter: @unchecked Sendable {
         if kind == .video {
             lastVideoFrame = buffer
             lastVideoTime = time
-        } else if !lastAudioTime.isValid || time > lastAudioTime {
-            lastAudioTime = time
+        } else {
+            lastAppendedAudio[kind] = time
+            if !lastAudioTime.isValid || time > lastAudioTime { lastAudioTime = time }
         }
     }
 
