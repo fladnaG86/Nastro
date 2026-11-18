@@ -69,7 +69,7 @@ non cambia l'icona: compare solo nel pannello, sotto la barra di livello.
     triangolo né ottagono); per questo avviso non arriva nessuna notifica.
 14. Durante una registrazione scollega o spegni il microfono scelto.
     **Atteso:** la registrazione continua; entro circa 5 secondi sotto la barra del Microfono
-    compare un avviso rosso ("Microfono scollegato" o "Il microfono non viene registrato"), accanto
+    compare un avviso rosso ("Microfono scollegato" o "Il microfono non viene registrato: ferma e avvia una nuova registrazione"), accanto
     al pallino rosso nella barra dei menu compare l'ottagono rosso e arriva una notifica; il file
     finale contiene comunque l'audio di sistema.
     **Se invece si ferma tutta la registrazione, annotalo** (questione aperta nota).
