@@ -153,4 +153,20 @@ final class ChatClientTests: XCTestCase {
             XCTFail("expected error")
         } catch { XCTAssertEqual(error as? SummaryError, .invalidURL) }
     }
+
+    func testLocalServerDisablesThinking() async throws {
+        let (session, id) = StubProtocol.session(ok("x"))
+        _ = try await OpenAIChatClient(settings: .default, apiKey: "", session: session).complete(messages)
+        let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(StubProtocol.body(id))) as? [String: Any])
+        let kwargs = try XCTUnwrap(obj["chat_template_kwargs"] as? [String: Any])
+        XCTAssertEqual(kwargs["enable_thinking"] as? Bool, false)
+    }
+
+    func testRemoteServerHasNoTemplateKwargs() async throws {
+        let (session, id) = StubProtocol.session(ok("x"))
+        let remote = SummarySettings(baseURL: "https://api.example.com/v1", model: "gpt")
+        _ = try await OpenAIChatClient(settings: remote, apiKey: "k", session: session).complete(messages)
+        let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(StubProtocol.body(id))) as? [String: Any])
+        XCTAssertNil(obj["chat_template_kwargs"])
+    }
 }

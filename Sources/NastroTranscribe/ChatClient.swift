@@ -22,6 +22,14 @@ public struct OpenAIChatClient: ChatClient {
         let messages: [ChatMessage]
         let stream: Bool
         let temperature: Double
+        /// llama.cpp-style servers: skip the hidden reasoning. Sent only to local servers,
+        /// since OpenAI rejects unknown parameters (nil is omitted from the JSON).
+        let chatTemplateKwargs: [String: Bool]?
+
+        enum CodingKeys: String, CodingKey {
+            case model, messages, stream, temperature
+            case chatTemplateKwargs = "chat_template_kwargs"
+        }
     }
 
     private struct Reply: Decodable {
@@ -40,7 +48,8 @@ public struct OpenAIChatClient: ChatClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if !apiKey.isEmpty { request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization") }
         request.httpBody = try JSONEncoder().encode(
-            RequestBody(model: settings.model, messages: messages, stream: false, temperature: 0.3))
+            RequestBody(model: settings.model, messages: messages, stream: false, temperature: 0.3,
+                        chatTemplateKwargs: settings.isLocal ? ["enable_thinking": false] : nil))
 
         let data: Data
         let response: URLResponse

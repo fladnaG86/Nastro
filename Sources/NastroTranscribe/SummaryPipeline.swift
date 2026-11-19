@@ -54,10 +54,15 @@ public struct SummaryPipeline: Sendable {
             let summary = try await summarize(transcript, recording: recording, phase: phase)
             switch summary {
             case .success(let url): return SummaryResult(transcript: transcriptURL, summary: url, failure: nil)
-            case .failure(let error): return SummaryResult(transcript: transcriptURL, summary: nil, failure: error)
+            case .failure(let error):
+                // A cancelled download, read or request often fails with its own mapped error.
+                if Task.isCancelled { throw SummaryError.cancelled }
+                return SummaryResult(transcript: transcriptURL, summary: nil, failure: error)
             }
-        } catch is CancellationError {
-            throw SummaryError.cancelled
+        } catch {
+            // Cancellation wins over whatever error the cancelled step mapped it to.
+            if error is CancellationError || Task.isCancelled { throw SummaryError.cancelled }
+            throw error
         }
     }
 

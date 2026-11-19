@@ -254,4 +254,68 @@ final class SummaryPipelineTests: XCTestCase {
         XCTAssertEqual(try folderContents(), ["2026-11-18 10.02 Call.mp4"])
         XCTAssertEqual(chat.sent.get().count, 0)
     }
+
+    /// Runs `pipeline` in a task, waits for `started` to flip (the fake under test was reached),
+    /// cancels, and expects `.cancelled`.
+    private func cancelWhile(_ pipeline: SummaryPipeline, started: Recorder<Bool>) async throws {
+        let task = Task { try await run(pipeline) }
+        while !started.get() { try await Task.sleep(for: .milliseconds(5)) }
+        task.cancel()
+        await assertThrows(.cancelled) { _ = try await task.value }
+    }
+
+    /// Like the real download / track loading: on cancel it fails with its own mapped error.
+    private static func failAfterCancel(_ started: Recorder<Bool>, _ error: SummaryError) async throws -> Never {
+        started.mutate { $0 = true }
+        while !Task.isCancelled { await Task.yield() }
+        throw error
+    }
+
+    func testCancelDuringPrepareWinsOverMappedError() async throws {
+        let started = Recorder(false)
+        let pipeline = SummaryPipeline(
+            transcriber: FakeTranscriber(segments: Self.twoSpeakers), chat: FakeChat(replies: ["R"]),
+            prepare: { try await Self.failAfterCancel(started, .speechModelUnavailable) },
+            extract: { [self] _, dir in twoStreams(dir) }, duration: { _ in 1 })
+        try await cancelWhile(pipeline, started: started)
+        XCTAssertEqual(try folderContents(), ["2026-11-18 10.02 Call.mp4"])
+    }
+
+    func testCancelDuringExtractWinsOverMappedError() async throws {
+        let started = Recorder(false)
+        let pipeline = SummaryPipeline(
+            transcriber: FakeTranscriber(segments: Self.twoSpeakers), chat: FakeChat(replies: ["R"]),
+            prepare: {},
+            extract: { _, _ in try await Self.failAfterCancel(started, .noAudio) }, duration: { _ in 1 })
+        try await cancelWhile(pipeline, started: started)
+        XCTAssertEqual(try folderContents(), ["2026-11-18 10.02 Call.mp4"])
+    }
+
+    func testChatCancelledIsThrownNotAFailure() async throws {
+        let chat = FakeChat(error: .cancelled)
+        await assertThrows(.cancelled) {
+            _ = try await self.run(self.makePipeline(transcriber: FakeTranscriber(segments: Self.twoSpeakers), chat: chat))
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: transcriptURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: summaryURL.path))
+        XCTAssertEqual(try tempFiles(), [])
+    }
+
+    func testCancelDuringChatKeepsTranscript() async throws {
+        /// A chat that, like a real server after cancel, fails as unreachable.
+        struct BlockingChat: ChatClient {
+            let started: Recorder<Bool>
+            func complete(_ messages: [ChatMessage]) async throws -> String {
+                try await SummaryPipelineTests.failAfterCancel(started, .modelUnreachable(url: "u"))
+            }
+        }
+        let started = Recorder(false)
+        let pipeline = SummaryPipeline(
+            transcriber: FakeTranscriber(segments: Self.twoSpeakers), chat: BlockingChat(started: started),
+            prepare: {}, extract: { [self] _, dir in twoStreams(dir) }, duration: { _ in 1 })
+        try await cancelWhile(pipeline, started: started)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: transcriptURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: summaryURL.path))
+        XCTAssertEqual(try tempFiles(), [])
+    }
 }
