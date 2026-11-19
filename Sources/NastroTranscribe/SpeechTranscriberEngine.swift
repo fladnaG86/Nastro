@@ -34,8 +34,12 @@ public struct SpeechTranscriberEngine: Transcriber {
         }
     }
 
+    /// Throws only `SummaryError`: unreadable audio `.noAudio`, cancellation `.cancelled`,
+    /// any other recognizer failure `.speechModelUnavailable`.
     public func transcribe(_ stream: AudioStream,
                            progress: @escaping @Sendable (Double) -> Void) async throws -> [TranscriptSegment] {
+        let audioFile: AVAudioFile
+        do { audioFile = try AVAudioFile(forReading: stream.file) } catch { throw SummaryError.noAudio }
         let transcriber = SpeechTranscriber(locale: locale, transcriptionOptions: [],
                                             reportingOptions: [], attributeOptions: [.audioTimeRange])
         let analyzer = SpeechAnalyzer(modules: [transcriber])
@@ -44,16 +48,18 @@ public struct SpeechTranscriberEngine: Transcriber {
         let collector = Task {
             var segments: [TranscriptSegment] = []
             for try await result in transcriber.results {
-                let start = result.range.start.seconds
-                let end = CMTimeRangeGetEnd(result.range).seconds
-                segments.append(TranscriptSegment(start: start, end: end,
-                                                  text: String(result.text.characters), speaker: speaker))
-                if duration > 0 { progress(min(max(end / duration, 0), 1)) }
+                let range = (start: result.range.start.seconds, end: CMTimeRangeGetEnd(result.range).seconds)
+                let words = result.text.runs.map { run in
+                    SentenceSplitter.Word(text: String(result.text[run.range].characters),
+                                          start: run.audioTimeRange?.start.seconds,
+                                          end: run.audioTimeRange.map { CMTimeRangeGetEnd($0).seconds })
+                }
+                segments += SentenceSplitter.split(words, range: range, speaker: speaker)
+                if duration > 0 { progress(min(max(range.end / duration, 0), 1)) }
             }
             return segments
         }
         do {
-            let audioFile = try AVAudioFile(forReading: stream.file)
             if let last = try await analyzer.analyzeSequence(from: audioFile) {
                 try await analyzer.finalizeAndFinish(through: last)
             } else {
@@ -66,7 +72,8 @@ public struct SpeechTranscriberEngine: Transcriber {
         } catch {
             collector.cancel()
             await analyzer.cancelAndFinishNow()
-            throw Task.isCancelled ? SummaryError.cancelled : error
+            if Task.isCancelled || error is CancellationError { throw SummaryError.cancelled }
+            throw SummaryError.speechModelUnavailable
         }
     }
 }

@@ -67,4 +67,46 @@ final class SpeechTranscriberEngineTests: XCTestCase {
         }
         XCTAssertEqual(log.values.last, 1.0)
     }
+
+    func testSplitsSentencesInOrder() async throws {
+        guard #available(macOS 26, *) else { throw XCTSkip("SpeechAnalyzer requires macOS 26") }
+        guard SpeechTranscriber.isAvailable else { throw XCTSkip("SpeechTranscriber not available") }
+        guard let voice = try italianVoice() else { throw XCTSkip("no it_IT voice for say") }
+
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("SpeechEngineTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let speech = dir.appendingPathComponent("three.aiff")
+        // Full sentences: on short phrases the recognizer often drops the full stops, and it folds
+        // silences into the next word's time range, so neither a pause nor a short text splits reliably.
+        try run("/usr/bin/say", ["-v", voice, "-o", speech.path,
+                                 "Buongiorno a tutti, grazie per essere qui. Oggi parliamo del preventivo per il cliente di Milano. "
+                                 + "Il cliente ha chiesto uno sconto sul totale, ma i costi del materiale sono aumentati."])
+        let audio = try AVAudioFile(forReading: speech)
+
+        try await SpeechTranscriberEngine.prepareModel()
+        let segments = try await SpeechTranscriberEngine().transcribe(
+            AudioStream(file: speech, speaker: nil, duration: Double(audio.length) / audio.fileFormat.sampleRate),
+            progress: { _ in })
+
+        XCTAssertGreaterThanOrEqual(segments.count, 3, "segments: \(segments.map(\.text))")
+        for (previous, next) in zip(segments, segments.dropFirst()) {
+            XCTAssertLessThan(previous.start, next.start)
+        }
+    }
+
+    func testNonAudioFileThrowsNoAudio() async throws {
+        guard #available(macOS 26, *) else { throw XCTSkip("SpeechAnalyzer requires macOS 26") }
+        let fake = FileManager.default.temporaryDirectory.appendingPathComponent("not-audio-\(UUID().uuidString).caf")
+        try Data("not audio".utf8).write(to: fake)
+        defer { try? FileManager.default.removeItem(at: fake) }
+
+        do {
+            _ = try await SpeechTranscriberEngine().transcribe(
+                AudioStream(file: fake, speaker: .me, duration: 1), progress: { _ in })
+            XCTFail("expected noAudio")
+        } catch let error as SummaryError {
+            XCTAssertEqual(error, .noAudio)
+        }
+    }
 }
