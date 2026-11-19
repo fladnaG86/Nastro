@@ -4,7 +4,8 @@ import NastroCore
 import NastroMedia
 
 /// Entry point: `Nastro --probe-record <seconds> <display|window|audio>`,
-/// `Nastro --probe-recover` and `Nastro --preview <idle|recording|problem|settings|settings-recording|menubar>` run
+/// `Nastro --probe-recover`, `Nastro --probe-transcribe <file>` and
+/// `Nastro --preview <idle|recording|problem|settings|settings-recording|menubar>` run
 /// diagnostics instead of the menu bar app.
 @main
 enum NastroMain {
@@ -14,6 +15,8 @@ enum NastroMain {
             ProbeRecord.run(Array(arguments[(index + 1)...]))
         } else if arguments.contains("--probe-recover") {
             ProbeRecord.runRecover()
+        } else if let index = arguments.firstIndex(of: "--probe-transcribe") {
+            ProbeTranscribe.run(Array(arguments[(index + 1)...]))
         } else if let index = arguments.firstIndex(of: "--preview") {
             PreviewWindow.run(Array(arguments[(index + 1)...]))
         } else {
