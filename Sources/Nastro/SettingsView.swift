@@ -14,7 +14,9 @@ struct SettingsView: View {
 
     private let summaryStore = SummarySettingsStore(defaults: .standard)
     @State private var summary = SummarySettingsStore(defaults: .standard).load()
-    @State private var apiKey = APIKeyStore.read()
+    @State private var apiKey = ""
+    /// What the Keychain held when the window appeared; the key is written only if the field differs.
+    @State private var loadedAPIKey: String?
 
     var body: some View {
         Form {
@@ -36,7 +38,13 @@ struct SettingsView: View {
                 Section(L10n.t(.settingsSummary)) { summarySettings }
             }
         }
-        .onDisappear { APIKeyStore.save(apiKey.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        .onAppear {
+            guard SummaryController.isAvailable, loadedAPIKey == nil else { return }
+            apiKey = APIKeyStore.read()
+            loadedAPIKey = apiKey
+        }
+        .onChange(of: summary) { _, new in summaryStore.save(new) }
+        .onDisappear(perform: saveAPIKeyIfChanged)
         .formStyle(.grouped)
         .frame(width: 460)
         .fixedSize(horizontal: false, vertical: true)
@@ -59,15 +67,14 @@ struct SettingsView: View {
     @ViewBuilder
     private var summarySettings: some View {
         TextField(L10n.t(.settingsServerURL), text: $summary.baseURL)
-            .onChange(of: summary) { _, new in summaryStore.save(new) }
         TextField(L10n.t(.settingsModel), text: $summary.model)
         SecureField(L10n.t(.settingsAPIKey), text: $apiKey)
-            .onSubmit { APIKeyStore.save(apiKey.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            .onSubmit(saveAPIKeyIfChanged)
         Text(L10n.t(.settingsServerHint))
             .font(.caption)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
-        if !summary.isLocal {
+        if summary.validated().chatCompletionsURL != nil, !summary.validated().isLocal {
             Label(L10n.t(.settingsRemoteWarning), systemImage: MenuBarLabel.warningSymbol)
                 .foregroundStyle(.orange)
                 .fixedSize(horizontal: false, vertical: true)
@@ -106,6 +113,14 @@ struct SettingsView: View {
                 Text(mic.name).tag(String?.some(mic.id))
             }
         }
+    }
+
+    private func saveAPIKeyIfChanged() {
+        guard SummaryController.isAvailable, let loaded = loadedAPIKey else { return }
+        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard key != loaded else { return }
+        APIKeyStore.save(key)
+        loadedAPIKey = key
     }
 
     private func chooseFolder() {

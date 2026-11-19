@@ -156,14 +156,13 @@ Servono macOS 26 e il server LLM locale (`llama-up`, porta 8001) per i passi che
     **Atteso:** la trascrizione è in italiano, con le righe etichettate Io e Altri; il riassunto è
     leggibile e fedele. Annota i tempi e la qualità (parole sbagliate, voci scambiate).
 30. Ferma il server LLM, poi avvia il riassunto di una registrazione.
-    **Atteso:** compare un messaggio di server non raggiungibile ("Trascrizione salvata, riassunto non riuscito."); il file `.trascrizione.txt` resta.
+    **Atteso:** arriva una notifica con "Trascrizione salvata, riassunto non riuscito." e, a capo, "Modello non raggiungibile su <indirizzo>: server LLM acceso?"; il file `.trascrizione.txt` resta.
     Riavvia il server con `llama-up` e rilancia sulla stessa registrazione: la trascrizione viene
     saltata e si rifà solo il riassunto.
 31. Avvia una trascrizione lunga e annullala a metà.
     **Atteso:** l'elaborazione si ferma; nella cartella non restano file temporanei.
 32. Mentre una trascrizione è in corso, avvia una nuova registrazione.
-    **Atteso:** la registrazione parte e non compare l'avviso di perdita di audio ("audio
-    interrotto"); alla fine il file si apre e non ha buchi.
+    **Atteso:** la registrazione parte e non compare l'avviso "Alcuni frammenti audio sono andati persi"; alla fine il file si apre e non ha buchi.
 33. Nelle Impostazioni, sezione Riassunto, scrivi un indirizzo remoto (per esempio
     `https://example.com/v1`).
     **Atteso:** compare l'avviso arancione "Con un indirizzo remoto il testo della call esce dal
