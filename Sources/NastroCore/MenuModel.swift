@@ -56,6 +56,8 @@ public struct MenuBarLabel: Equatable, Sendable {
 public enum MenuSection: Equatable, Sendable {
     case problem, hotKeyConflict, start, mode, videoSource, audio
     case stop, meters, preparing
+    /// The running transcription/summary job; the row that starts one.
+    case summaryJob, summarize
     case openFolder, settings, quit
 }
 
@@ -78,9 +80,11 @@ public struct ProblemRow: Equatable, Sendable {
 
 public enum MenuLayout {
     /// The rows to show, in order. While recording or preparing the file there are no source
-    /// choices and no Quit (quitting would cut the file short).
+    /// choices and no Quit (quitting would cut the file short). In every state the summary job
+    /// (if running) and the summarize row (if available) come just before Open folder.
     public static func sections(state: RecorderState, mode: RecordingMode, problem: StartProblem?,
-                                hotKeyConflict: Bool = false) -> [MenuSection] {
+                                hotKeyConflict: Bool = false, summaryAvailable: Bool = false,
+                                summaryRunning: Bool = false) -> [MenuSection] {
         var rows: [MenuSection] = []
         switch state {
         case .idle, .starting:
@@ -96,7 +100,16 @@ public enum MenuLayout {
             if hotKeyConflict { rows.append(.hotKeyConflict) }
             rows += [.preparing, .openFolder, .settings]
         }
+        var summary: [MenuSection] = []
+        if summaryRunning { summary.append(.summaryJob) }
+        if summaryAvailable { summary.append(.summarize) }
+        if let index = rows.firstIndex(of: .openFolder) { rows.insert(contentsOf: summary, at: index) }
         return rows
+    }
+
+    /// One job at a time, and not while recording (both would compete for the machine).
+    public static func summarizeEnabled(state: RecorderState, summaryRunning: Bool) -> Bool {
+        state == .idle && !summaryRunning
     }
 
     public static func problemRow(for problem: StartProblem) -> ProblemRow {

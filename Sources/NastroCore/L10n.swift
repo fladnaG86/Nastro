@@ -29,6 +29,7 @@ public enum L10n {
         case settingsTitle, settingsFolder, chooseFolder, settingsMaxResolution, settingsFramesPerSecond
         case settingsKeepSeparateTracks, settingsMicrophone, systemDefaultMicrophone, settingsHotKey
         case settingsAppliesNextRecording
+        case settingsSummary, settingsServerURL, settingsModel, settingsAPIKey, settingsServerHint, settingsRemoteWarning
         // Hotkey conflict (%@ = the shortcut) and permission relaunch
         case hotKeyInUseMenu, hotKeyInUseSettings, relaunchAfterGranting, quitNastro
         // Notifications
@@ -46,6 +47,12 @@ public enum L10n {
         // Start problems
         case problemScreenPermission, problemMicrophonePermission, problemFolder
         case problemSourceUnavailable, problemOther
+        // Transcription and summary (%d = percent; %d, %d = part, parts; %@ = server URL;
+        // %d, %@ = HTTP status, detail)
+        case summarizeEllipsis, summaryPreparing, summaryTranscribing, summarySummarizingOne, summarySummarizing
+        case summaryReady, transcriptSavedSummaryFailed, cancel
+        case errNoAudio, errNoSpeech, errSpeechModel, errCannotWrite, errInvalidURL, errUnreachable
+        case errHTTP, errServer, errEmptyReply
     }
 
     public static func t(_ key: Key, language: Language = .current) -> String {
@@ -86,6 +93,12 @@ public enum L10n {
         case .systemDefaultMicrophone: return "Predefinito di sistema"
         case .settingsHotKey: return "Scorciatoia"
         case .settingsAppliesNextRecording: return "Registrazione in corso: queste impostazioni valgono dalla prossima registrazione."
+        case .settingsSummary: return "Riassunto"
+        case .settingsServerURL: return "Indirizzo server"
+        case .settingsModel: return "Modello"
+        case .settingsAPIKey: return "Chiave API (facoltativa)"
+        case .settingsServerHint: return "Locale: http://127.0.0.1:8001/v1 (llama.cpp). Nastro non avvia il server: avvialo tu prima di riassumere."
+        case .settingsRemoteWarning: return "Con un indirizzo remoto il testo della call esce dal Mac."
         case .hotKeyInUseMenu: return "La scorciatoia %@ è usata da un'altra app. Puoi cambiarla nelle Impostazioni."
         case .hotKeyInUseSettings: return "%@ è usata da un'altra app: scegli un'altra lettera."
         case .relaunchAfterGranting: return "Dopo averlo concesso, esci e riapri Nastro."
@@ -109,7 +122,7 @@ public enum L10n {
         case .warningMicrophoneSilent: return "Microfono muto"
         case .warningMicrophoneLost: return "Microfono scollegato"
         case .warningSystemAudioNotRecorded: return "L'audio di sistema non viene registrato"
-        case .warningMicrophoneNotRecorded: return "Il microfono non viene registrato"
+        case .warningMicrophoneNotRecorded: return "Il microfono non viene registrato: ferma e avvia una nuova registrazione"
         case .warningAudioDropouts: return "Alcuni frammenti audio sono andati persi"
         case .noAudio: return "Nessun audio entro 5 secondi: registrazione annullata."
         case .recordingNotSaved: return "La registrazione non è stata salvata."
@@ -118,6 +131,23 @@ public enum L10n {
         case .problemFolder: return "La cartella delle registrazioni non è scrivibile."
         case .problemSourceUnavailable: return "La sorgente scelta non è disponibile."
         case .problemOther: return "Errore imprevisto all'avvio della registrazione."
+        case .summarizeEllipsis: return "Trascrivi e riassumi…"
+        case .summaryPreparing: return "Preparazione…"
+        case .summaryTranscribing: return "Trascrizione %d%%"
+        case .summarySummarizingOne: return "Riassunto…"
+        case .summarySummarizing: return "Riassunto %d di %d…"
+        case .summaryReady: return "Riassunto pronto"
+        case .transcriptSavedSummaryFailed: return "Trascrizione salvata, riassunto non riuscito."
+        case .cancel: return "Annulla"
+        case .errNoAudio: return "La registrazione non ha audio leggibile."
+        case .errNoSpeech: return "Nella registrazione non si sente parlare."
+        case .errSpeechModel: return "Il riconoscimento vocale italiano non è disponibile."
+        case .errCannotWrite: return "Impossibile scrivere accanto alla registrazione."
+        case .errInvalidURL: return "Indirizzo del server non valido."
+        case .errUnreachable: return "Modello non raggiungibile su %@: server LLM acceso?"
+        case .errHTTP: return "Errore %d dal server: %@"
+        case .errServer: return "Errore dal server."
+        case .errEmptyReply: return "Il modello ha risposto senza testo."
         }
     }
 
@@ -152,6 +182,12 @@ public enum L10n {
         case .systemDefaultMicrophone: return "System default"
         case .settingsHotKey: return "Shortcut"
         case .settingsAppliesNextRecording: return "Recording in progress: these settings apply from the next recording."
+        case .settingsSummary: return "Summary"
+        case .settingsServerURL: return "Server address"
+        case .settingsModel: return "Model"
+        case .settingsAPIKey: return "API key (optional)"
+        case .settingsServerHint: return "Local: http://127.0.0.1:8001/v1 (llama.cpp). Nastro does not start the server: start it before summarizing."
+        case .settingsRemoteWarning: return "With a remote address the call text leaves your Mac."
         case .hotKeyInUseMenu: return "The shortcut %@ is used by another app. You can change it in Settings."
         case .hotKeyInUseSettings: return "%@ is used by another app: choose another letter."
         case .relaunchAfterGranting: return "After granting it, quit and reopen Nastro."
@@ -175,7 +211,7 @@ public enum L10n {
         case .warningMicrophoneSilent: return "Microphone is silent"
         case .warningMicrophoneLost: return "Microphone disconnected"
         case .warningSystemAudioNotRecorded: return "System audio is not being recorded"
-        case .warningMicrophoneNotRecorded: return "The microphone is not being recorded"
+        case .warningMicrophoneNotRecorded: return "The microphone is not being recorded: stop and start a new recording"
         case .warningAudioDropouts: return "Some audio was lost"
         case .noAudio: return "No audio within 5 seconds: recording cancelled."
         case .recordingNotSaved: return "The recording could not be saved."
@@ -184,6 +220,23 @@ public enum L10n {
         case .problemFolder: return "The recordings folder is not writable."
         case .problemSourceUnavailable: return "The chosen source is not available."
         case .problemOther: return "Unexpected error while starting the recording."
+        case .summarizeEllipsis: return "Transcribe and summarize…"
+        case .summaryPreparing: return "Preparing…"
+        case .summaryTranscribing: return "Transcribing %d%%"
+        case .summarySummarizingOne: return "Summarizing…"
+        case .summarySummarizing: return "Summary %d of %d…"
+        case .summaryReady: return "Summary ready"
+        case .transcriptSavedSummaryFailed: return "Transcript saved, summary failed."
+        case .cancel: return "Cancel"
+        case .errNoAudio: return "The recording has no readable audio."
+        case .errNoSpeech: return "No speech was heard in the recording."
+        case .errSpeechModel: return "Italian speech recognition is not available."
+        case .errCannotWrite: return "Cannot write next to the recording."
+        case .errInvalidURL: return "Invalid server address."
+        case .errUnreachable: return "Model not reachable at %@: is the LLM server running?"
+        case .errHTTP: return "Error %d from the server: %@"
+        case .errServer: return "Error from the server."
+        case .errEmptyReply: return "The model replied with no text."
         }
     }
 }

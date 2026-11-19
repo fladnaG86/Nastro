@@ -4,11 +4,14 @@ import NastroCore
 import NastroMedia
 import UserNotifications
 
-/// User notifications. Clicking one that carries a file shows it in the Finder. Outside an
+/// User notifications. Clicking one that carries a file shows it in the Finder (or opens it,
+/// for a summary). Outside an
 /// app bundle (`swift run`, the diagnostics) `UNUserNotificationCenter` raises an exception,
 /// so messages go to standard error instead.
 enum Notifier {
     private static let pathKey = "path"
+    /// true = clicking opens the file instead of revealing it.
+    private static let openKey = "open"
 
     static var isAvailable: Bool {
         Bundle.main.bundleIdentifier != nil && Bundle.main.bundlePath.hasSuffix(".app")
@@ -69,7 +72,17 @@ enum Notifier {
         post(title: L10n.t(.appName), body: message + "\n" + file.path, file: file)
     }
 
-    private static func post(title: String, body: String, file: URL?) {
+    /// Clicking opens the summary.
+    static func summaryReady(_ summary: URL) {
+        post(title: L10n.t(.summaryReady), body: summary.lastPathComponent, file: summary, opensFile: true)
+    }
+
+    /// Clicking reveals the transcript, if one was saved.
+    static func summaryFailed(_ message: String, transcript: URL?) {
+        post(title: L10n.t(.appName), body: message, file: transcript)
+    }
+
+    private static func post(title: String, body: String, file: URL?, opensFile: Bool = false) {
         guard isAvailable else {
             FileHandle.standardError.write(Data("Nastro notification: \(title) — \(body)\n".utf8))
             return
@@ -78,12 +91,12 @@ enum Notifier {
         content.title = title
         content.body = body
         content.sound = .default
-        if let file { content.userInfo = [pathKey: file.path] }
+        if let file { content.userInfo = [pathKey: file.path, openKey: opensFile] }
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
     }
 
-    /// Shows banners while Nastro is frontmost and reveals the notification's file on click.
+    /// Shows banners while Nastro is frontmost and reveals (or opens) the notification's file on click.
     private final class ClickHandler: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
         static let shared = ClickHandler()
 
@@ -95,9 +108,17 @@ enum Notifier {
 
         func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                     withCompletionHandler completionHandler: @escaping () -> Void) {
-            if let path = response.notification.request.content.userInfo[Notifier.pathKey] as? String {
+            let userInfo = response.notification.request.content.userInfo
+            if let path = userInfo[Notifier.pathKey] as? String {
                 let url = URL(fileURLWithPath: path)
-                DispatchQueue.main.async { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                let opens = userInfo[Notifier.openKey] as? Bool ?? false
+                DispatchQueue.main.async {
+                    if opens {
+                        NSWorkspace.shared.open(url)
+                    } else {
+                        NSWorkspace.shared.activateFileViewerSelecting([url])
+                    }
+                }
             }
             completionHandler()
         }

@@ -32,7 +32,7 @@ behavior, except what is stated as measured in [docs/capture-findings.md](docs/c
    Then the work file is deleted and a notification appears; clicking it shows the file in Finder.
 
 Nastro uses only Apple frameworks and has no dependencies. It records only while you tell it to, and
-nothing leaves your Mac.
+nothing leaves your Mac unless you point the optional summary at a remote server (see below).
 
 ## Requirements
 
@@ -135,6 +135,33 @@ Evidence: a recording driven by the app's own recording controller (the `--probe
 diagnostic below) was killed with `kill -9` at 13 s, and at the next launch it was recovered as a
 12 s file that opens. Not yet confirmed with the installed app on a real interruption.
 
+## Transcription and summary
+
+Nastro can turn a recording into text and a short summary, on demand. In the menu bar panel choose
+**Transcribe and summarize…** and pick a recording. This needs **macOS 26 or later**: the
+transcription uses the speech recognition built into macOS (Italian), runs on your Mac and needs no
+speech permission. Where macOS 26 is not available the action and the Settings section are hidden.
+
+It writes two files next to the recording: a transcript (`<name>.trascrizione.txt`) and a summary (`<name>.riassunto.md`). If
+the transcript already exists, a second run skips the transcription and only summarizes again.
+
+- **Speed, measured on the development Mac:** 44.8 s of Italian audio transcribed in about 0.8 s; a
+  62 s two-voice call summarized by Gemma 4 26B-A4B in about 4 s. That is fast because Nastro turns
+  the model's "thinking" off (`chat_template_kwargs` `enable_thinking=false`), on local servers
+  only.
+- **The summary needs an LLM server that is already running.** Nastro does not start it. The default
+  is llama.cpp on `http://127.0.0.1:8001/v1`; any OpenAI-compatible server works. Address, model
+  name and an optional API key are in **Settings… > Summary**.
+- **Privacy.** With a local address nothing leaves your Mac. With a remote address the text of the
+  call is sent to that server; Settings show an orange warning in that case.
+- **Who speaks.** The two tracks are labelled *Io* (you) and *Altri* (the others) only when
+  "Keep separate audio tracks" is on; otherwise the transcript has no speaker labels.
+- **Limit:** with speakers instead of headphones the microphone also hears the others, so the same
+  sentences can appear under both *Io* and *Altri*.
+
+Diagnostics: `Nastro --probe-transcribe <file>` and `Nastro --probe-summarize <recording>` run the
+two steps from the terminal.
+
 ## Diagnostics (for developers)
 
 The binary can run a few checks from the terminal instead of starting the menu bar app:
@@ -168,7 +195,7 @@ measure the capture APIs (`swift run NastroProbe`; see [docs/capture-findings.md
   yet confirmed.
 - **Signing.** Until `scripts/make-dev-cert.sh` has been run and checked, expect macOS to ask for the
   Screen Recording permission again after rebuilds.
-- Not included: webcam overlay, region selection, editing, transcription, start at login.
+- Not included: webcam overlay, region selection, editing, start at login.
 
 ## Similar projects
 
@@ -218,7 +245,7 @@ verificato, tranne ciò che è indicato come misurato in
    file si mostra nel Finder.
 
 Nastro usa solo framework Apple, senza dipendenze. Registra solo quando glielo dici tu e nulla esce
-dal tuo Mac.
+dal tuo Mac, a meno che tu non indichi per il riassunto facoltativo un server remoto (vedi sotto).
 
 ## Requisiti
 
@@ -328,6 +355,35 @@ Prove: una registrazione guidata dal controller di registrazione dell'app stessa
 recuperata come file di 12 s che si apre. Non ancora confermato con l'app installata su
 un'interruzione reale.
 
+## Trascrizione e riassunto
+
+Nastro può trasformare una registrazione in testo e in un breve riassunto, a richiesta. Nel pannello
+nella barra dei menu scegli **Trascrivi e riassumi…** e seleziona una registrazione.
+Richiede **macOS 26 o successivo**: la trascrizione usa il riconoscimento vocale integrato in macOS
+(italiano), gira sul tuo Mac e non richiede nessun permesso di riconoscimento vocale. Dove macOS 26
+non c'è, l'azione e la sezione nelle Impostazioni non compaiono.
+
+Scrive due file accanto alla registrazione: la trascrizione (`<nome>.trascrizione.txt`) e il riassunto
+(`<nome>.riassunto.md`). Se la trascrizione esiste già, una seconda esecuzione salta la trascrizione e rifà solo il
+riassunto.
+
+- **Velocità, misurata sul Mac di sviluppo:** 44,8 s di audio italiano trascritti in circa 0,8 s;
+  una call di 62 s con due voci riassunta da Gemma 4 26B-A4B in circa 4 s. È veloce perché Nastro
+  spegne il "ragionamento" del modello (`chat_template_kwargs` `enable_thinking=false`), solo sui
+  server locali.
+- **Il riassunto richiede un server LLM già avviato.** Nastro non lo avvia. Il predefinito è
+  llama.cpp su `http://127.0.0.1:8001/v1`; va bene qualsiasi server compatibile OpenAI. Indirizzo,
+  nome del modello e una chiave API facoltativa sono in **Impostazioni… > Riassunto**.
+- **Privacy.** Con un indirizzo locale nulla esce dal Mac. Con un indirizzo remoto il testo della
+  call viene inviato a quel server; le Impostazioni mostrano in quel caso un avviso arancione.
+- **Chi parla.** Le due tracce sono etichettate *Io* (tu) e *Altri* solo se "Tieni tracce audio
+  separate" è attivo; altrimenti la trascrizione non ha etichette di chi parla.
+- **Limite:** con gli altoparlanti al posto delle cuffie il microfono sente anche gli altri, quindi
+  le stesse frasi possono comparire sia sotto *Io* sia sotto *Altri*.
+
+Diagnostica: `Nastro --probe-transcribe <file>` e `Nastro --probe-summarize <registrazione>`
+eseguono i due passaggi da terminale.
+
 ## Diagnostica (per sviluppatori)
 
 L'eseguibile può fare alcune verifiche da terminale invece di avviare l'app nella barra dei menu:
@@ -364,7 +420,7 @@ vedi [docs/capture-findings.md](docs/capture-findings.md)).
   confermato.
 - **Firma.** Finché `scripts/make-dev-cert.sh` non è stato eseguito e verificato, aspettati che macOS
   chieda di nuovo il permesso di Registrazione schermo dopo le ricompilazioni.
-- Non incluso: webcam in sovrimpressione, selezione di un'area, editing, trascrizione, avvio al login.
+- Non incluso: webcam in sovrimpressione, selezione di un'area, editing, avvio al login.
 
 ## Progetti simili
 

@@ -29,6 +29,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>LSUIElement</key><true/>
     <key>NSMicrophoneUsageDescription</key>
     <string>Nastro records your voice during calls. / Nastro registra la tua voce durante le call.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Nastro transcribes your recordings on this Mac. / Nastro trascrive le tue registrazioni su questo Mac.</string>
     <key>NSScreenCaptureUsageDescription</key>
     <string>Nastro records your screen and system audio during calls. / Nastro registra lo schermo e l'audio di sistema durante le call.</string>
 </dict>

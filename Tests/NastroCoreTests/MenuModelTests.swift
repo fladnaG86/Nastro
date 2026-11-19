@@ -330,6 +330,33 @@ final class MenuModelTests: XCTestCase {
         XCTAssertNil(SourceChoice.microphoneName(selectedID: nil, available: mics, systemDefault: nil))
     }
 
+    // MARK: Summary rows
+
+    func testSummarizeRowsPlacement() {
+        let since = Date()
+        XCTAssertEqual(Array(MenuLayout.sections(state: .idle, mode: .videoAndAudio, problem: nil,
+                                                 summaryAvailable: true, summaryRunning: true).suffix(6)),
+                       [.audio, .summaryJob, .summarize, .openFolder, .settings, .quit])
+        XCTAssertEqual(MenuLayout.sections(state: .recording(since: since), mode: .videoAndAudio, problem: nil,
+                                           summaryAvailable: true),
+                       [.stop, .meters, .summarize, .openFolder, .settings])
+        let states: [RecorderState] = [.idle, .starting, .recording(since: since), .finalizing(reason: .user)]
+        for state in states {
+            for mode in [RecordingMode.videoAndAudio, .audioOnly] {
+                XCTAssertEqual(MenuLayout.sections(state: state, mode: mode, problem: .folder, hotKeyConflict: true,
+                                                   summaryAvailable: false, summaryRunning: false),
+                               MenuLayout.sections(state: state, mode: mode, problem: .folder, hotKeyConflict: true))
+            }
+        }
+    }
+
+    func testSummarizeEnabled() {
+        XCTAssertTrue(MenuLayout.summarizeEnabled(state: .idle, summaryRunning: false))
+        XCTAssertFalse(MenuLayout.summarizeEnabled(state: .recording(since: Date()), summaryRunning: false))
+        XCTAssertFalse(MenuLayout.summarizeEnabled(state: .idle, summaryRunning: true))
+        XCTAssertFalse(MenuLayout.summarizeEnabled(state: .finalizing(reason: .user), summaryRunning: false))
+    }
+
     // MARK: Settings choices
 
     func testResolutionAndFpsOptions() {

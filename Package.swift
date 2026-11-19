@@ -7,9 +7,11 @@ let package = Package(
     targets: [
         .target(name: "NastroCore", path: "Sources/NastroCore"),
         .target(name: "NastroMedia", dependencies: ["NastroCore"], path: "Sources/NastroMedia"),
-        .executableTarget(name: "Nastro", dependencies: ["NastroCore", "NastroMedia"], path: "Sources/Nastro"),
+        .target(name: "NastroTranscribe", dependencies: ["NastroCore"], path: "Sources/NastroTranscribe"),
+        .executableTarget(name: "Nastro", dependencies: ["NastroCore", "NastroMedia", "NastroTranscribe"], path: "Sources/Nastro"),
         .executableTarget(name: "NastroProbe", dependencies: ["NastroMedia"], path: "Sources/NastroProbe"),
         .testTarget(name: "NastroCoreTests", dependencies: ["NastroCore"], path: "Tests/NastroCoreTests"),
         .testTarget(name: "NastroMediaTests", dependencies: ["NastroMedia"], path: "Tests/NastroMediaTests"),
+        .testTarget(name: "NastroTranscribeTests", dependencies: ["NastroTranscribe"], path: "Tests/NastroTranscribeTests"),
     ]
 )
