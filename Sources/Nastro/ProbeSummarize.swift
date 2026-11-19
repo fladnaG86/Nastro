@@ -32,10 +32,7 @@ enum ProbeSummarize {
     private static func summarize(_ recording: URL) async throws -> Int32 {
         let settings = SummarySettingsStore(defaults: .standard).load()
         print("LLM \(settings.baseURL) model \(settings.model)")
-        let pipeline = SummaryPipeline(
-            transcriber: SpeechTranscriberEngine(),
-            chat: OpenAIChatClient(settings: settings, apiKey: APIKeyStore.read()),
-            prepare: { try await SpeechTranscriberEngine.prepareModel() })
+        let pipeline = SummaryPipeline.live(settings: settings)
         let started = Date()
         let printer = PhasePrinter(started: started)
         let result = try await pipeline.run(recording: recording, phase: { printer.show($0) })

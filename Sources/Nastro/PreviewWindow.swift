@@ -2,7 +2,7 @@ import AppKit
 import NastroCore
 import SwiftUI
 
-/// Diagnostic: `Nastro --preview <idle|recording|problem|settings|settings-recording|menubar>` shows one view in an
+/// Diagnostic: `Nastro --preview <idle|recording|problem|summary|settings|settings-recording|menubar>` shows one view in an
 /// ordinary titled window, with fixed values. No menu bar item, no capture, no permission
 /// request; it stays open until the process is killed.
 @MainActor
@@ -10,7 +10,7 @@ enum PreviewWindow {
     private static var window: NSWindow?
 
     nonisolated static func run(_ arguments: [String]) -> Never {
-        let modes = ["idle", "recording", "problem", "settings", "settings-recording", "menubar"]
+        let modes = ["idle", "recording", "problem", "summary", "settings", "settings-recording", "menubar"]
         guard let mode = arguments.first, modes.contains(mode) else {
             print("usage: Nastro --preview <\(modes.joined(separator: "|"))>")
             exit(1)
@@ -25,6 +25,10 @@ enum PreviewWindow {
                 var status = idleStatus(problem: .screenPermission)
                 status.hotKey = .inUse("N")
                 root = AnyView(PreviewPanel(status: status, loadSources: true))
+            case "summary":
+                var status = idleStatus(problem: nil)
+                status.summaryJob = ("Nastro 2026-11-18 10.30.00 riunione settimanale progetto.mp4", .transcribing(0.58))
+                root = AnyView(PreviewPanel(status: status, loadSources: false))
             case "settings": root = AnyView(PreviewSettings(locked: false, hotKey: .registered("N")))
             case "settings-recording": root = AnyView(PreviewSettings(locked: true, hotKey: .inUse("N")))
             case "menubar": root = AnyView(PreviewMenuBarLabels())
@@ -47,7 +51,7 @@ enum PreviewWindow {
     private static func idleStatus(problem: StartProblem?) -> PanelStatus {
         PanelStatus(state: .idle, elapsedSeconds: 0, systemLevelDB: AudioLevel.floorDB,
                     microphoneLevelDB: AudioLevel.floorDB, warnings: [], problem: problem,
-                    hotKey: .registered("N"))
+                    hotKey: .registered("N"), summaryAvailable: SummaryController.isAvailable)
     }
 
     private static let recordingStatus = PanelStatus(

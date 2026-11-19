@@ -15,6 +15,10 @@ struct PanelStatus {
     var hotKey: HotKeyOutcome
     /// The running recording's settings (meters and warnings follow these while recording).
     var recordingSettings: NastroCore.Settings? = nil
+    /// The transcribe-and-summarize row is offered (macOS 26).
+    var summaryAvailable = false
+    /// The running summary job: recording name and phase.
+    var summaryJob: (name: String, phase: SummaryPhase)? = nil
 }
 
 /// The source lists offered in the panel.
@@ -47,6 +51,8 @@ struct PanelActions {
     var openSettings: () -> Void = {}
     var quit: () -> Void = {}
     var openSystemSettings: (PermissionPane) -> Void = { _ in }
+    var summarize: () -> Void = {}
+    var cancelSummary: () -> Void = {}
 }
 
 /// The menu bar panel: idle choices, or the running recording with its level meters.
@@ -68,7 +74,8 @@ struct MenuView: View {
 
     private var sections: [MenuSection] {
         MenuLayout.sections(state: status.state, mode: settings.mode, problem: status.problem,
-                            hotKeyConflict: HotKeyLetters.conflict(status.hotKey) != nil)
+                            hotKeyConflict: HotKeyLetters.conflict(status.hotKey) != nil,
+                            summaryAvailable: status.summaryAvailable, summaryRunning: status.summaryJob != nil)
     }
 
     private var editable: Bool { MenuLayout.choicesEditable(status.state) }
@@ -85,6 +92,14 @@ struct MenuView: View {
         case .stop: stopRow
         case .meters: metersRow
         case .preparing: preparingRow
+        case .summaryJob: summaryJobRow
+        case .summarize:
+            VStack(spacing: 2) {
+                // The job row above already opens the block with its divider.
+                if status.summaryJob == nil { Divider().padding(.bottom, 4) }
+                MenuRowButton(title: L10n.t(.summarizeEllipsis), action: actions.summarize)
+                    .disabled(!MenuLayout.summarizeEnabled(state: status.state, summaryRunning: status.summaryJob != nil))
+            }
         case .openFolder:
             VStack(spacing: 2) {
                 Divider().padding(.bottom, 4)
@@ -277,6 +292,34 @@ struct MenuView: View {
         HStack(spacing: 8) {
             ProgressView().controlSize(.small)
             Text(L10n.t(.preparingFile))
+        }
+    }
+
+    // MARK: Summary
+
+    @ViewBuilder
+    private var summaryJobRow: some View {
+        if let job = status.summaryJob {
+            VStack(alignment: .leading, spacing: 6) {
+                Divider().padding(.bottom, 4)
+                Text(job.name)
+                    .font(.callout)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if case .transcribing(let fraction) = job.phase {
+                    ProgressView(value: min(max(fraction, 0), 1))
+                } else {
+                    ProgressView().progressViewStyle(.linear)
+                }
+                HStack {
+                    Text(SummaryMessages.phaseText(job.phase))
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button(L10n.t(.cancel), action: actions.cancelSummary)
+                        .controlSize(.small)
+                }
+            }
         }
     }
 }

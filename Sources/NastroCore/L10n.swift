@@ -46,6 +46,12 @@ public enum L10n {
         // Start problems
         case problemScreenPermission, problemMicrophonePermission, problemFolder
         case problemSourceUnavailable, problemOther
+        // Transcription and summary (%d = percent; %d, %d = part, parts; %@ = server URL;
+        // %d, %@ = HTTP status, detail)
+        case summarizeEllipsis, summaryPreparing, summaryTranscribing, summarySummarizingOne, summarySummarizing
+        case summaryReady, transcriptSavedSummaryFailed, cancel
+        case errNoAudio, errNoSpeech, errSpeechModel, errCannotWrite, errInvalidURL, errUnreachable
+        case errHTTP, errServer, errEmptyReply
     }
 
     public static func t(_ key: Key, language: Language = .current) -> String {
@@ -118,6 +124,23 @@ public enum L10n {
         case .problemFolder: return "La cartella delle registrazioni non è scrivibile."
         case .problemSourceUnavailable: return "La sorgente scelta non è disponibile."
         case .problemOther: return "Errore imprevisto all'avvio della registrazione."
+        case .summarizeEllipsis: return "Trascrivi e riassumi…"
+        case .summaryPreparing: return "Preparazione…"
+        case .summaryTranscribing: return "Trascrizione %d%%"
+        case .summarySummarizingOne: return "Riassunto…"
+        case .summarySummarizing: return "Riassunto %d di %d…"
+        case .summaryReady: return "Riassunto pronto"
+        case .transcriptSavedSummaryFailed: return "Trascrizione salvata, riassunto non riuscito."
+        case .cancel: return "Annulla"
+        case .errNoAudio: return "La registrazione non ha audio leggibile."
+        case .errNoSpeech: return "Nella registrazione non si sente parlare."
+        case .errSpeechModel: return "Il riconoscimento vocale italiano non è disponibile."
+        case .errCannotWrite: return "Impossibile scrivere accanto alla registrazione."
+        case .errInvalidURL: return "Indirizzo del server non valido."
+        case .errUnreachable: return "Modello non raggiungibile su %@: server LLM acceso?"
+        case .errHTTP: return "Errore %d dal server: %@"
+        case .errServer: return "Errore dal server."
+        case .errEmptyReply: return "Il modello ha risposto senza testo."
         }
     }
 
@@ -184,6 +207,23 @@ public enum L10n {
         case .problemFolder: return "The recordings folder is not writable."
         case .problemSourceUnavailable: return "The chosen source is not available."
         case .problemOther: return "Unexpected error while starting the recording."
+        case .summarizeEllipsis: return "Transcribe and summarize…"
+        case .summaryPreparing: return "Preparing…"
+        case .summaryTranscribing: return "Transcribing %d%%"
+        case .summarySummarizingOne: return "Summarizing…"
+        case .summarySummarizing: return "Summary %d of %d…"
+        case .summaryReady: return "Summary ready"
+        case .transcriptSavedSummaryFailed: return "Transcript saved, summary failed."
+        case .cancel: return "Cancel"
+        case .errNoAudio: return "The recording has no readable audio."
+        case .errNoSpeech: return "No speech was heard in the recording."
+        case .errSpeechModel: return "Italian speech recognition is not available."
+        case .errCannotWrite: return "Cannot write next to the recording."
+        case .errInvalidURL: return "Invalid server address."
+        case .errUnreachable: return "Model not reachable at %@: is the LLM server running?"
+        case .errHTTP: return "Error %d from the server: %@"
+        case .errServer: return "Error from the server."
+        case .errEmptyReply: return "The model replied with no text."
         }
     }
 }

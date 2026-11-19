@@ -5,7 +5,7 @@ import NastroMedia
 
 /// Entry point: `Nastro --probe-record <seconds> <display|window|audio>`,
 /// `Nastro --probe-recover`, `Nastro --probe-transcribe <file>`, `Nastro --probe-summarize <file>` and
-/// `Nastro --preview <idle|recording|problem|settings|settings-recording|menubar>` run
+/// `Nastro --preview <idle|recording|problem|summary|settings|settings-recording|menubar>` run
 /// diagnostics instead of the menu bar app.
 @main
 enum NastroMain {
@@ -39,6 +39,7 @@ final class AppStatus: ObservableObject {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let controller = RecordingController(store: SettingsStore(defaults: .standard))
     let status = AppStatus()
+    let summary = SummaryController()
     private var hotKeyLetter: AnyCancellable?
     private static let askedScreenKey = "askedScreenPermission"
 
@@ -74,7 +75,7 @@ struct NastroApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            LiveMenuPanel(controller: appDelegate.controller, app: appDelegate.status)
+            LiveMenuPanel(controller: appDelegate.controller, app: appDelegate.status, summary: appDelegate.summary)
         } label: {
             LiveMenuBarLabel(controller: appDelegate.controller, app: appDelegate.status)
         }
@@ -105,6 +106,7 @@ private struct LiveMenuBarLabel: View {
 private struct LiveMenuPanel: View {
     @ObservedObject var controller: RecordingController
     @ObservedObject var app: AppStatus
+    @ObservedObject var summary: SummaryController
     @State private var sources = PanelSources()
     @Environment(\.openSettings) private var openSettings
     @Environment(\.dismiss) private var dismiss
@@ -123,7 +125,8 @@ private struct LiveMenuPanel: View {
                     warnings: controller.warnings,
                     problem: MenuLayout.displayedProblem(startProblem: controller.startProblem,
                                                          screenGranted: app.screenGranted),
-                    hotKey: app.hotKey, recordingSettings: controller.recordingSettings)
+                    hotKey: app.hotKey, recordingSettings: controller.recordingSettings,
+                    summaryAvailable: SummaryController.isAvailable, summaryJob: summary.running)
     }
 
     private var actions: PanelActions {
@@ -144,7 +147,12 @@ private struct LiveMenuPanel: View {
             openSystemSettings: { pane in
                 Permissions.openSystemSettings(pane == .screen ? .screen : .microphone)
                 dismiss()
-            })
+            },
+            summarize: {
+                dismiss()
+                summary.chooseAndRun(folder: controller.settings.validated().outputFolder)
+            },
+            cancelSummary: { summary.cancel() })
     }
 
     private func reload() async {
