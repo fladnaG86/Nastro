@@ -28,7 +28,8 @@ public enum SummaryMessages {
         case .preparing:
             return L10n.t(.summaryPreparing, language: language)
         case .transcribing(let fraction):
-            let percent = Int((min(max(fraction, 0), 1) * 100).rounded())
+            let safe = fraction.isFinite ? min(max(fraction, 0), 1) : 0
+            let percent = Int((safe * 100).rounded())
             return String(format: L10n.t(.summaryTranscribing, language: language), percent)
         case .summarizing(let part, let total):
             if total <= 1 { return L10n.t(.summarySummarizingOne, language: language) }

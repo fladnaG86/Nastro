@@ -55,7 +55,7 @@ public enum Transcript {
     /// One "[HH:MM:SS] Io: text" line per segment (no label when the speaker is unknown).
     public static func render(_ segments: [TranscriptSegment]) -> String {
         segments.map { segment in
-            let s = max(Int(segment.start), 0)
+            let s = segment.start.isFinite ? max(Int(segment.start), 0) : 0
             let stamp = String(format: "[%02d:%02d:%02d] ", s / 3600, (s % 3600) / 60, s % 60)
             return stamp + (segment.speaker.map { $0.label + ": " } ?? "") + segment.text + "\n"
         }.joined()

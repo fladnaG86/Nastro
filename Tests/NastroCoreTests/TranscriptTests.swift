@@ -38,4 +38,11 @@ final class TranscriptTests: XCTestCase {
         XCTAssertTrue(Transcript.isBlank(" \n\t")); XCTAssertFalse(Transcript.isBlank("a"))
         XCTAssertTrue(Transcript.hasSpeakers("[00:00:01] Altri: x\n")); XCTAssertFalse(Transcript.hasSpeakers("[00:00:01] x\n"))
     }
+
+    func testRenderUsesZeroForNonFiniteStart() {
+        for start in [Double.nan, .infinity, -.infinity] {
+            let text = Transcript.render([TranscriptSegment(start: start, end: 5, text: "ciao", speaker: nil)])
+            XCTAssertEqual(text, "[00:00:00] ciao\n")
+        }
+    }
 }

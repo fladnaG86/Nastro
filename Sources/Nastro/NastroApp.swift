@@ -150,7 +150,8 @@ private struct LiveMenuPanel: View {
             },
             summarize: {
                 dismiss()
-                summary.chooseAndRun(folder: controller.settings.validated().outputFolder)
+                summary.chooseAndRun(folder: controller.settings.validated().outputFolder,
+                                     canStart: { controller.state == .idle })
             },
             cancelSummary: { summary.cancel() })
     }

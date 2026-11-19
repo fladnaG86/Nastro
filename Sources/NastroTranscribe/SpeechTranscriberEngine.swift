@@ -48,14 +48,20 @@ public struct SpeechTranscriberEngine: Transcriber {
         let collector = Task {
             var segments: [TranscriptSegment] = []
             for try await result in transcriber.results {
-                let range = (start: result.range.start.seconds, end: CMTimeRangeGetEnd(result.range).seconds)
+                // Non-finite times (invalid CMTime) would trap later in Int conversions.
+                let finite: (Double) -> Double? = { $0.isFinite ? $0 : nil }
+                let range = (start: finite(result.range.start.seconds) ?? 0,
+                             end: finite(CMTimeRangeGetEnd(result.range).seconds) ?? 0)
                 let words = result.text.runs.map { run in
                     SentenceSplitter.Word(text: String(result.text[run.range].characters),
-                                          start: run.audioTimeRange?.start.seconds,
-                                          end: run.audioTimeRange.map { CMTimeRangeGetEnd($0).seconds })
+                                          start: finite(run.audioTimeRange?.start.seconds ?? .nan),
+                                          end: finite(run.audioTimeRange.map { CMTimeRangeGetEnd($0).seconds } ?? .nan))
                 }
                 segments += SentenceSplitter.split(words, range: range, speaker: speaker)
-                if duration > 0 { progress(min(max(range.end / duration, 0), 1)) }
+                if duration > 0 {
+                    let fraction = range.end / duration
+                    if fraction.isFinite { progress(min(max(fraction, 0), 1)) }
+                }
             }
             return segments
         }

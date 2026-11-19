@@ -23,8 +23,8 @@ enum SentenceSplitter {
             defer { buffer.removeAll() }
             let text = buffer.map(\.text).joined().trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return }
-            let start = buffer.lazy.compactMap(\.start).first ?? range.start
-            let end = buffer.reversed().lazy.compactMap(\.end).first ?? range.end
+            let start = buffer.lazy.compactMap(\.start).first(where: \.isFinite) ?? range.start
+            let end = buffer.reversed().lazy.compactMap(\.end).first(where: \.isFinite) ?? range.end
             segments.append(TranscriptSegment(start: start, end: max(end, start), text: text, speaker: speaker))
         }
 

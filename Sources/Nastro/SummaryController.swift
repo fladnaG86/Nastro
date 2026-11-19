@@ -21,8 +21,17 @@ final class SummaryController: ObservableObject {
     }
 
     /// Asks for a recording in `folder`, then runs the job in the background.
-    func chooseAndRun(folder: URL) {
+    /// The picker opens on the next main-runloop turn, after the menu bar panel has closed; the
+    /// job starts only if `canStart` still holds once a file is chosen (e.g. recorder idle).
+    func chooseAndRun(folder: URL, canStart: @escaping @MainActor () -> Bool) {
         guard running == nil, Self.isAvailable else { return }
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated { self?.presentPicker(folder: folder, canStart: canStart) }
+        }
+    }
+
+    private func presentPicker(folder: URL, canStart: @MainActor () -> Bool) {
+        guard running == nil else { return }
         let panel = NSOpenPanel()
         panel.directoryURL = folder
         panel.allowedContentTypes = [.mpeg4Movie, .mpeg4Audio]
@@ -31,6 +40,7 @@ final class SummaryController: ObservableObject {
         panel.canChooseFiles = true
         NSApp.activate()
         guard panel.runModal() == .OK, let recording = panel.url else { return }
+        guard running == nil, canStart() else { return }
         run(recording)
     }
 

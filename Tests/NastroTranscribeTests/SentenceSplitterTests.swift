@@ -52,4 +52,10 @@ final class SentenceSplitterTests: XCTestCase {
         XCTAssertTrue(SentenceSplitter.split([Word(text: "  ", start: 1, end: 2)], range: range, speaker: nil).isEmpty)
         XCTAssertTrue(SentenceSplitter.split([], range: range, speaker: nil).isEmpty)
     }
+
+    func testNonFiniteWordTimesFallBackToResultRange() {
+        let words = [Word(text: "Ciao.", start: .nan, end: .infinity)]
+        let segments = SentenceSplitter.split(words, range: range, speaker: .me)
+        XCTAssertEqual(segments, [TranscriptSegment(start: 0, end: 30, text: "Ciao.", speaker: .me)])
+    }
 }

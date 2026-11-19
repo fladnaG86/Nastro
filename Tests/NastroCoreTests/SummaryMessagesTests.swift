@@ -43,4 +43,9 @@ final class SummaryMessagesTests: XCTestCase {
         XCTAssertEqual(SummaryMessages.phaseText(.summarizing(part: 2, of: 3), language: .it), "Riassunto 2 di 3…")
         XCTAssertEqual(SummaryMessages.phaseText(.summarizing(part: 1, of: 1), language: .it), "Riassunto…")
     }
+
+    func testNonFiniteProgressShowsZeroPercent() {
+        XCTAssertEqual(SummaryMessages.phaseText(.transcribing(.nan), language: .it), "Trascrizione 0%")
+        XCTAssertEqual(SummaryMessages.phaseText(.transcribing(.infinity), language: .it), "Trascrizione 0%")
+    }
 }

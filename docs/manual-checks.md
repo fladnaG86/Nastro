@@ -155,6 +155,9 @@ Servono macOS 26 e il server LLM locale (`llama-up`, porta 8001) per i passi che
     poi scegli "Trascrivi e riassumi…" su quella registrazione. Cronometra le due fasi.
     **Atteso:** la trascrizione è in italiano, con le righe etichettate Io e Altri; il riassunto è
     leggibile e fedele. Annota i tempi e la qualità (parole sbagliate, voci scambiate).
+    Verifica anche: il selettore file si apre in primo piano (davanti alle altre finestre);
+    cliccando la notifica "Riassunto pronto" si apre il file `.md`; premendo "Annulla" durante la
+    trascrizione non restano file `.nastro-tmp` nella cartella.
 30. Ferma il server LLM, poi avvia il riassunto di una registrazione.
     **Atteso:** arriva una notifica con "Trascrizione salvata, riassunto non riuscito." e, a capo, "Modello non raggiungibile su <indirizzo>: server LLM acceso?"; il file `.trascrizione.txt` resta.
     Riavvia il server con `llama-up` e rilancia sulla stessa registrazione: la trascrizione viene
