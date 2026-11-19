@@ -5,7 +5,7 @@ cosa fare e cosa deve succedere. Se il risultato è diverso, annota cosa è succ
 
 I passi 19–22 in fondo coprono le correzioni successive (impostazioni bloccate, scorciatoia
 occupata, riga del permesso); i passi 23–28 coprono AirPods, sincronia, recupero dopo un arresto,
-ascolto con un solo auricolare e disco esterno scollegato.
+ascolto con un solo auricolare e disco esterno scollegato; i passi 29–33 coprono trascrizione e riassunto.
 
 **Icone nella barra dei menu.** Il triangolo arancione accanto all'icona compare solo per un
 problema da risolvere prima di registrare (per esempio un permesso mancante). Durante la
@@ -146,3 +146,25 @@ non cambia l'icona: compare solo nel pannello, sotto la barra di livello.
     poi espelli e scollega il disco e premi "Avvia registrazione".
     **Atteso:** la registrazione non parte; il menu mostra un errore chiaro ("La cartella delle
     registrazioni non è scrivibile.") e arriva una notifica; nessun file viene creato altrove.
+
+## Trascrizione e riassunto
+
+Servono macOS 26 e il server LLM locale (`llama-up`, porta 8001) per i passi che riassumono.
+
+29. Con "Tieni tracce audio separate" attivo, registra una call vera di circa 1 ora (due voci),
+    poi scegli "Trascrivi e riassumi…" su quella registrazione. Cronometra le due fasi.
+    **Atteso:** la trascrizione è in italiano, con le righe etichettate Io e Altri; il riassunto è
+    leggibile e fedele. Annota i tempi e la qualità (parole sbagliate, voci scambiate).
+30. Ferma il server LLM, poi avvia il riassunto di una registrazione.
+    **Atteso:** compare un messaggio di server non raggiungibile ("Trascrizione salvata, riassunto non riuscito."); il file `.trascrizione.txt` resta.
+    Riavvia il server con `llama-up` e rilancia sulla stessa registrazione: la trascrizione viene
+    saltata e si rifà solo il riassunto.
+31. Avvia una trascrizione lunga e annullala a metà.
+    **Atteso:** l'elaborazione si ferma; nella cartella non restano file temporanei.
+32. Mentre una trascrizione è in corso, avvia una nuova registrazione.
+    **Atteso:** la registrazione parte e non compare l'avviso di perdita di audio ("audio
+    interrotto"); alla fine il file si apre e non ha buchi.
+33. Nelle Impostazioni, sezione Riassunto, scrivi un indirizzo remoto (per esempio
+    `https://example.com/v1`).
+    **Atteso:** compare l'avviso arancione "Con un indirizzo remoto il testo della call esce dal
+    Mac"; con `http://127.0.0.1:8001/v1` l'avviso sparisce. Rimetti l'indirizzo predefinito.

@@ -29,6 +29,7 @@ public enum L10n {
         case settingsTitle, settingsFolder, chooseFolder, settingsMaxResolution, settingsFramesPerSecond
         case settingsKeepSeparateTracks, settingsMicrophone, systemDefaultMicrophone, settingsHotKey
         case settingsAppliesNextRecording
+        case settingsSummary, settingsServerURL, settingsModel, settingsAPIKey, settingsServerHint, settingsRemoteWarning
         // Hotkey conflict (%@ = the shortcut) and permission relaunch
         case hotKeyInUseMenu, hotKeyInUseSettings, relaunchAfterGranting, quitNastro
         // Notifications
@@ -92,6 +93,12 @@ public enum L10n {
         case .systemDefaultMicrophone: return "Predefinito di sistema"
         case .settingsHotKey: return "Scorciatoia"
         case .settingsAppliesNextRecording: return "Registrazione in corso: queste impostazioni valgono dalla prossima registrazione."
+        case .settingsSummary: return "Riassunto"
+        case .settingsServerURL: return "Indirizzo server"
+        case .settingsModel: return "Modello"
+        case .settingsAPIKey: return "Chiave API (facoltativa)"
+        case .settingsServerHint: return "Locale: http://127.0.0.1:8001/v1 (llama.cpp). Nastro non avvia il server: avvialo tu prima di riassumere."
+        case .settingsRemoteWarning: return "Con un indirizzo remoto il testo della call esce dal Mac."
         case .hotKeyInUseMenu: return "La scorciatoia %@ è usata da un'altra app. Puoi cambiarla nelle Impostazioni."
         case .hotKeyInUseSettings: return "%@ è usata da un'altra app: scegli un'altra lettera."
         case .relaunchAfterGranting: return "Dopo averlo concesso, esci e riapri Nastro."
@@ -175,6 +182,12 @@ public enum L10n {
         case .systemDefaultMicrophone: return "System default"
         case .settingsHotKey: return "Shortcut"
         case .settingsAppliesNextRecording: return "Recording in progress: these settings apply from the next recording."
+        case .settingsSummary: return "Summary"
+        case .settingsServerURL: return "Server address"
+        case .settingsModel: return "Model"
+        case .settingsAPIKey: return "API key (optional)"
+        case .settingsServerHint: return "Local: http://127.0.0.1:8001/v1 (llama.cpp). Nastro does not start the server: start it before summarizing."
+        case .settingsRemoteWarning: return "With a remote address the call text leaves your Mac."
         case .hotKeyInUseMenu: return "The shortcut %@ is used by another app. You can change it in Settings."
         case .hotKeyInUseSettings: return "%@ is used by another app: choose another letter."
         case .relaunchAfterGranting: return "After granting it, quit and reopen Nastro."
